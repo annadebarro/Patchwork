@@ -1,5 +1,5 @@
 # Patchwork
-{ CS 422 Group Project }
+CS 422 Group Project
 
 ## Project Description
 
