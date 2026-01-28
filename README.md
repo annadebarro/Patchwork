@@ -50,3 +50,21 @@ From the social side, Patchwork creates an all-in-one platform to share your int
         - Content filtering (all/inspiration/listings)
     - Search Service
     - Collection Storage (Users, Posts, Boards, Sessions, Images)
+
+## Getting Started
+
+- Requirements: Node.js 18+, npm, and a running MongoDB instance.
+- Copy environment files and install dependencies:
+  - `cp server/.env.example server/.env` and update `MONGODB_URI` if needed
+  - `npm install --prefix server`
+  - `npm install --prefix client`
+- Optional: set `client/.env` from `client/.env.example` when pointing the UI to a non-local API.
+- Run the stack locally:
+  - API: `npm run dev --prefix server` (listens on port 5000)
+  - Frontend: `npm run dev --prefix client` (listens on port 5173 with an API proxy to \`/api\`)
+- Health check is at `/api/health`; the frontend displays API/DB status on load.
+
+## Project Structure
+
+- `server/` — Express API with MongoDB connection (entry: `src/server.js`)
+- `client/` — Vite + React frontend scaffolded for Patchwork
