@@ -12,10 +12,10 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 
 ~ Team Roles ~
 
-Team Leader: Jack
-Team Communicator: Inna
-Project Master: Emily
-Project Delivery: Anna
+- Team Leader: Jack
+- Team Communicator: Inna
+- Project Master: Emily
+- Project Delivery: Anna
 
 
 ~ General UI/UX ~
