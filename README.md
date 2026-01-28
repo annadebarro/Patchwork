@@ -37,13 +37,13 @@ Project Delivery: Anna
 
 ~ Backend Breakdown ~
 
-Our Backend will be made up of:
+- Our Backend will be made up of:
 
     - Node.js/Express Server to host the site
 
     - MongoDB to store information and posts
 
-What does the Node.js/Express Server consist of?
+- What does the Node.js/Express Server consist of?
 
     - Authentication Service
 
