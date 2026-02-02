@@ -127,56 +127,77 @@ function App() {
     setView("login");
   }
 
-  return (
-    <main className="shell">
-      <div className="card">
-        <h1 className="logo">Patchwork</h1>
+  // Sample images for collage (placeholder fashion photos)
+  const collageImages = [
+    "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=400&h=400&fit=crop",
+    "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=400&h=400&fit=crop",
+  ];
 
-        {view !== "home" && (
-          <div className="tabs">
-            <button
-              className={view === "login" ? "active" : ""}
-              onClick={() => {
-                setError("");
-                setView("login");
-              }}
-            >
-              Log in
-            </button>
-            <button
-              className={view === "signup" ? "active" : ""}
-              onClick={() => {
-                setError("");
-                setView("signup");
-              }}
-            >
-              Create account
-            </button>
-          </div>
-        )}
+  // Home view (after login)
+  if (view === "home") {
+    return (
+      <div className="home-container">
+        <div className="home">
+          <h1 className="logo">Patchwork</h1>
+          <p className="hello">
+            Hello{user?.name ? `, ${user.name}` : ""}! More coming later.
+          </p>
+          <button onClick={handleLogout}>Log out</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Login/Signup view
+  return (
+    <main className="auth-container">
+      {/* Left side - Photo collage */}
+      <div className="photo-collage">
+        <div className="collage-grid">
+          {collageImages.map((src, index) => (
+            <div key={index} className="collage-item">
+              <img src={src} alt={`Fashion ${index + 1}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right side - Auth form */}
+      <div className="auth-form-container">
+        <h2 className="auth-title">
+          {view === "login" ? "Log into Patchwork" : "Create an account"}
+        </h2>
 
         {error && <div className="error">{error}</div>}
 
         {view === "signup" && (
           <form className="form" onSubmit={handleSignup}>
             <label>
-              Name
-              <input name="name" type="text" placeholder="Your name" required />
+              <input name="name" type="text" placeholder="name" required />
             </label>
             <label>
-              Email
-              <input name="email" type="email" placeholder="you@example.com" required />
+              <input name="email" type="email" placeholder="email" required />
             </label>
             <label>
-              Username
               <input name="username" type="text" placeholder="username" required />
             </label>
             <label>
-              Password
-              <input name="password" type="password" placeholder="At least 8 characters" required minLength={8} />
+              <input name="password" type="password" placeholder="password" required minLength={8} />
             </label>
             <button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create account"}
+              {loading ? "creating..." : "create account"}
+            </button>
+            <button
+              type="button"
+              className="switch-auth"
+              onClick={() => {
+                setError("");
+                setView("login");
+              }}
+            >
+              log in
             </button>
           </form>
         )}
@@ -184,31 +205,30 @@ function App() {
         {view === "login" && (
           <form className="form" onSubmit={handleLogin}>
             <label>
-              Email or username
               <input
                 name="emailOrUsername"
                 type="text"
-                placeholder="you@example.com or username"
+                placeholder="username"
                 required
               />
             </label>
             <label>
-              Password
-              <input name="password" type="password" placeholder="••••••••" required />
+              <input name="password" type="password" placeholder="password" required />
             </label>
             <button type="submit" disabled={loading}>
-              {loading ? "Signing in..." : "Log in"}
+              {loading ? "logging in..." : "log in"}
+            </button>
+            <button
+              type="button"
+              className="switch-auth"
+              onClick={() => {
+                setError("");
+                setView("signup");
+              }}
+            >
+              create an account
             </button>
           </form>
-        )}
-
-        {view === "home" && (
-          <div className="home">
-            <p className="hello">
-              Hello{user?.name ? `, ${user.name}` : ""}! More coming later.
-            </p>
-            <button onClick={handleLogout}>Log out</button>
-          </div>
         )}
       </div>
     </main>
