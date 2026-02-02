@@ -1,17 +1,31 @@
 import { useEffect, useState } from "react";
+import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from "react-router-dom";
 import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
+// Sample images for collage (placeholder fashion photos)
+const collageImages = [
+  "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=400&h=400&fit=crop",
+  "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=400&fit=crop",
+  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=400&h=400&fit=crop",
+  "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=400&h=400&fit=crop",
+];
+
 function App() {
-  const [view, setView] = useState("login"); // login | signup | home
+  const navigate = useNavigate();
+  const [authView, setAuthView] = useState("login");
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      setCheckingAuth(false);
+      return;
+    }
 
     async function fetchMe() {
       try {
@@ -21,12 +35,13 @@ function App() {
         if (res.ok) {
           const data = await res.json();
           setUser(data.user);
-          setView("home");
         } else {
           localStorage.removeItem("token");
         }
       } catch {
         localStorage.removeItem("token");
+      } finally {
+        setCheckingAuth(false);
       }
     }
 
@@ -77,7 +92,7 @@ function App() {
       } else {
         localStorage.setItem("token", data.token);
         setUser(data.user);
-        setView("home");
+        navigate("/home/social", { replace: true });
       }
     } catch (err) {
       console.error("Signup network error", err);
@@ -111,7 +126,7 @@ function App() {
       } else {
         localStorage.setItem("token", data.token);
         setUser(data.user);
-        setView("home");
+        navigate("/home/social", { replace: true });
       }
     } catch (err) {
       console.error("Login network error", err);
@@ -124,35 +139,74 @@ function App() {
   function handleLogout() {
     localStorage.removeItem("token");
     setUser(null);
-    setView("login");
+    setAuthView("login");
+    navigate("/", { replace: true });
   }
 
-  // Sample images for collage (placeholder fashion photos)
-  const collageImages = [
-    "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=400&h=400&fit=crop",
-    "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=400&fit=crop",
-    "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=400&h=400&fit=crop",
-    "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=400&h=400&fit=crop",
-  ];
+  function handleSwitchView(nextView) {
+    setError("");
+    setAuthView(nextView);
+  }
 
-  // Home view (after login)
-  if (view === "home") {
+  if (checkingAuth) {
     return (
-      <div className="home-container">
-        <div className="home">
+      <div className="loading-container">
+        <div className="loading-card">
           <h1 className="logo">Patchwork</h1>
-          <p className="hello">
-            Hello{user?.name ? `, ${user.name}` : ""}! More coming later.
-          </p>
-          <button onClick={handleLogout}>Log out</button>
+          <p className="loading">Loading...</p>
         </div>
       </div>
     );
   }
 
-  // Login/Signup view
   return (
-    <main className="auth-container">
+    <main className={`shell ${user ? "shell--home" : "shell--auth"}`}>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            user ? (
+              <Navigate to="/home/social" replace />
+            ) : (
+              <AuthPage
+                authView={authView}
+                error={error}
+                loading={loading}
+                onLogin={handleLogin}
+                onSignup={handleSignup}
+                onSwitchView={handleSwitchView}
+              />
+            )
+          }
+        />
+        <Route
+          path="/home"
+          element={
+            <RequireAuth user={user}>
+              <HomeLayout user={user} onLogout={handleLogout} />
+            </RequireAuth>
+          }
+        >
+          <Route index element={<Navigate to="social" replace />} />
+          <Route path="social" element={<SocialHome />} />
+          <Route path="marketplace" element={<MarketplaceHome />} />
+        </Route>
+        <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
+      </Routes>
+    </main>
+  );
+}
+
+function RequireAuth({ user, children }) {
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
+function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView }) {
+  return (
+    <div className="auth-container">
       {/* Left side - Photo collage */}
       <div className="photo-collage">
         <div className="collage-grid">
@@ -167,13 +221,13 @@ function App() {
       {/* Right side - Auth form */}
       <div className="auth-form-container">
         <h2 className="auth-title">
-          {view === "login" ? "Log into Patchwork" : "Create an account"}
+          {authView === "login" ? "Log into Patchwork" : "Create an account"}
         </h2>
 
         {error && <div className="error">{error}</div>}
 
-        {view === "signup" && (
-          <form className="form" onSubmit={handleSignup}>
+        {authView === "signup" ? (
+          <form className="form" onSubmit={onSignup}>
             <label>
               <input name="name" type="text" placeholder="name" required />
             </label>
@@ -192,18 +246,13 @@ function App() {
             <button
               type="button"
               className="switch-auth"
-              onClick={() => {
-                setError("");
-                setView("login");
-              }}
+              onClick={() => onSwitchView("login")}
             >
               log in
             </button>
           </form>
-        )}
-
-        {view === "login" && (
-          <form className="form" onSubmit={handleLogin}>
+        ) : (
+          <form className="form" onSubmit={onLogin}>
             <label>
               <input
                 name="emailOrUsername"
@@ -221,17 +270,70 @@ function App() {
             <button
               type="button"
               className="switch-auth"
-              onClick={() => {
-                setError("");
-                setView("signup");
-              }}
+              onClick={() => onSwitchView("signup")}
             >
               create an account
             </button>
           </form>
         )}
       </div>
-    </main>
+    </div>
+  );
+}
+
+function HomeLayout({ user, onLogout }) {
+  return (
+    <section className="home-layout">
+      <header className="home-header">
+        <div>
+          <p className="home-kicker">Home</p>
+          <h1 className="home-title">Patchwork</h1>
+          <p className="home-subtitle">
+            {user?.name ? `Welcome back, ${user.name}.` : "Welcome back."}
+          </p>
+        </div>
+        <div className="home-actions">
+          <button className="logout" onClick={onLogout} type="button">
+            Log out
+          </button>
+        </div>
+      </header>
+
+      <nav className="home-switch" aria-label="Home sections">
+        <NavLink to="social" className={({ isActive }) => (isActive ? "active" : "")}>Social</NavLink>
+        <NavLink to="marketplace" className={({ isActive }) => (isActive ? "active" : "")}>
+          Marketplace
+        </NavLink>
+      </nav>
+
+      <div className="home-content">
+        <Outlet />
+      </div>
+    </section>
+  );
+}
+
+function SocialHome() {
+  return (
+    <section className="home-panel">
+      <h2>Social posts</h2>
+      <p className="home-description">This feed will show community posts and updates.</p>
+      <div className="placeholder" aria-label="Social posts feed placeholder">
+        <p>No social posts yet.</p>
+      </div>
+    </section>
+  );
+}
+
+function MarketplaceHome() {
+  return (
+    <section className="home-panel">
+      <h2>Marketplace posts</h2>
+      <p className="home-description">This feed will surface listings, offers, and requests.</p>
+      <div className="placeholder" aria-label="Marketplace posts feed placeholder">
+        <p>No marketplace posts yet.</p>
+      </div>
+    </section>
   );
 }
 
