@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -172,16 +180,19 @@ function App() {
           }
         />
         <Route
-          path="/home"
           element={
             <RequireAuth user={user}>
-              <HomeLayout user={user} onLogout={handleLogout} />
+              <AuthedLayout user={user} onLogout={handleLogout} />
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="social" replace />} />
-          <Route path="social" element={<SocialHome />} />
-          <Route path="marketplace" element={<MarketplaceHome />} />
+          <Route path="/home" element={<HomeLayout user={user} />}>
+            <Route index element={<Navigate to="social" replace />} />
+            <Route path="social" element={<SocialHome />} />
+            <Route path="marketplace" element={<MarketplaceHome />} />
+          </Route>
+          <Route path="/userpage/:username" element={<UserPage />} />
+          <Route path="/profile" element={<UserPage user={user} isOwnProfile />} />
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
       </Routes>
@@ -261,21 +272,46 @@ function AuthCard({ authView, error, loading, onLogin, onSignup, onSwitchView })
   );
 }
 
-function HomeLayout({ user, onLogout }) {
+function AuthedLayout({ user, onLogout }) {
+  return (
+    <div className="app-shell">
+      <aside className="side-nav">
+        <div className="side-title">Patchwork</div>
+        <nav className="side-links" aria-label="Primary">
+          <NavLink to="/home/social" className={({ isActive }) => (isActive ? "active" : "")}>Home</NavLink>
+          <NavLink to="/profile" className={({ isActive }) => (isActive ? "active" : "")}>
+            My profile
+          </NavLink>
+        </nav>
+      </aside>
+      <div className="app-main">
+        <header className="app-header">
+          <div>
+            <div className="app-user">{user?.name || "Signed in"}</div>
+            <div className="app-handle">@{user?.username || "user"}</div>
+          </div>
+          <button className="logout" onClick={onLogout} type="button">
+            Log out
+          </button>
+        </header>
+        <div className="app-content">
+          <Outlet />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeLayout({ user }) {
   return (
     <section className="home-layout">
       <header className="home-header">
         <div>
           <p className="home-kicker">Home</p>
-          <h1 className="home-title">Patchwork</h1>
+          <h1 className="home-title">Your feeds</h1>
           <p className="home-subtitle">
             {user?.name ? `Welcome back, ${user.name}.` : "Welcome back."}
           </p>
-        </div>
-        <div className="home-actions">
-          <button className="logout" onClick={onLogout} type="button">
-            Log out
-          </button>
         </div>
       </header>
 
@@ -313,6 +349,50 @@ function MarketplaceHome() {
       <div className="placeholder" aria-label="Marketplace posts feed placeholder">
         <p>No marketplace posts yet.</p>
       </div>
+    </section>
+  );
+}
+
+function UserPage({ user, isOwnProfile = false }) {
+  const { username } = useParams();
+  const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
+  const displayUsername = isOwnProfile ? user?.username || "your-username" : username || "username";
+
+  return (
+    <section className="user-page">
+      <header className="user-header">
+        <div>
+          <h1 className="user-name">{displayName}</h1>
+          <p className="user-handle">@{displayUsername}</p>
+        </div>
+        {isOwnProfile && (
+          <button className="edit-profile" type="button">
+            Change account info
+          </button>
+        )}
+      </header>
+
+      <div className="user-stats">
+        <div className="stat">
+          <span className="stat-value">0</span>
+          <span className="stat-label">Followers</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">0</span>
+          <span className="stat-label">Following</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">0</span>
+          <span className="stat-label">Posts</span>
+        </div>
+      </div>
+
+      <section className="user-posts" aria-label="Assigned posts">
+        <h2 className="user-posts-title">Assigned posts</h2>
+        <div className="placeholder">
+          <p>No posts assigned yet.</p>
+        </div>
+      </section>
     </section>
   );
 }
