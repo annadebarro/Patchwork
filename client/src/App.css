@@ -687,10 +687,56 @@ button:disabled {
 
 .user-header {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  align-items: center;
+  gap: 20px;
   flex-wrap: wrap;
+}
+
+.user-header-info {
+  flex: 1;
+}
+
+/* Profile Picture Patch */
+.profile-patch {
+  width: 100px;
+  height: 100px;
+  background: var(--denim-mid);
+  border: 4px solid var(--denim-dark);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 4px 4px 0 var(--denim-dark);
+  position: relative;
+}
+
+.profile-patch::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  border: 2px dashed var(--stitch);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.profile-patch-inner {
+  width: 100%;
+  height: 100%;
+  background: var(--paper);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-patch-initial {
+  font-size: 2.5rem;
+  font-family: 'Special Elite', cursive;
+  color: var(--denim-dark);
+  font-weight: 700;
 }
 
 .user-name {

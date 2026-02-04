@@ -457,6 +457,17 @@ function MarketplaceHome() {
   );
 }
 
+function ProfilePatch({ name }) {
+  const initial = name?.charAt(0).toUpperCase() || "?";
+  return (
+    <div className="profile-patch">
+      <div className="profile-patch-inner">
+        <span className="profile-patch-initial">{initial}</span>
+      </div>
+    </div>
+  );
+}
+
 function UserPage({ user, isOwnProfile = false }) {
   const { username } = useParams();
   const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
@@ -466,7 +477,8 @@ function UserPage({ user, isOwnProfile = false }) {
     <div className="feed-content">
       <section className="user-page">
         <header className="user-header">
-          <div>
+          <ProfilePatch name={displayName} />
+          <div className="user-header-info">
             <h1 className="user-name">{displayName}</h1>
             <p className="user-handle">@{displayUsername}</p>
           </div>
