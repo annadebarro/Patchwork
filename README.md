@@ -1,7 +1,7 @@
 # Patchwork
-{ CS 422 Group Project }
+CS 422 Group Project
 
-~ Project Description ~
+## Project Description
 
 Patchwork is a social media site for selling/buying clothing, developing a brand, and building relationships with others. With this, our platform implements a quilt theme to create a more curated and fashionable look to posts and profiles. 
 
@@ -10,7 +10,7 @@ From a business perspective, Patchwork helps you easily establish a brand around
 From the social side, Patchwork creates an all-in-one platform to share your interests, create inspiration boards, and pass of those hand-me-downs that have been aching to get out of your closet to either friends or others with similar styles.
 
 
-~ Team Roles ~
+## Team Roles
 
 - Team Leader: Jack
 - Team Communicator: Inna
@@ -18,7 +18,7 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 - Project Delivery: Anna
 
 
-~ General UI/UX ~
+## General UI/UX 
 
 - Create an account using personal information (email, name, username, password). 
 - Post and edit content that symbolize patches on a quilt or a backpack, with the grid/profile view of your posts literally looking like a collection of patches on a quilt sewn together through front-end design
@@ -29,7 +29,7 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 - Use two way rating system so buyers can rate sellers and sellers can rate buyers
 
 
-~ Backend Breakdown ~
+## Backend Breakdown
 
 - Our Backend will be made up of:
     - Node.js/Express Server to host the site
