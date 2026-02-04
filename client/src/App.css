@@ -520,24 +520,50 @@ button:disabled {
   position: relative;
 }
 
+.feed-tab:first-child {
+  transform: rotate(-1deg);
+}
+
+.feed-tab:last-child {
+  transform: rotate(1.5deg);
+}
+
+/* Frayed edges on tabs */
 .feed-tab::before {
   content: '';
   position: absolute;
-  top: 3px;
-  left: 3px;
-  right: 3px;
-  bottom: 3px;
-  border: 1px dashed transparent;
-  transition: border-color 0.2s;
+  top: -3px;
+  left: 8px;
+  right: 10px;
+  height: 4px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--stitch) 0px,
+    var(--stitch) 2px,
+    transparent 2px,
+    transparent 5px
+  );
+}
+
+.feed-tab::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 6px;
+  right: 8px;
+  height: 4px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--stitch) 0px,
+    var(--stitch) 3px,
+    transparent 3px,
+    transparent 6px
+  );
 }
 
 .feed-tab:hover {
   background: var(--denim-wash);
   border-color: var(--denim-mid);
-}
-
-.feed-tab:hover::before {
-  border-color: var(--cream);
 }
 
 .feed-tab.active {
@@ -548,7 +574,23 @@ button:disabled {
 }
 
 .feed-tab.active::before {
-  border-color: var(--stitch);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--mustard) 0px,
+    var(--mustard) 2px,
+    transparent 2px,
+    transparent 5px
+  );
+}
+
+.feed-tab.active::after {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--mustard) 0px,
+    var(--mustard) 3px,
+    transparent 3px,
+    transparent 6px
+  );
 }
 
 /* Feed Content */
