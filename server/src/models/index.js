@@ -27,6 +27,11 @@ function initModels(sequelize) {
         type: DataTypes.STRING,
         allowNull: false,
       },
+      bio: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: "",
+      },
       passwordHash: {
         type: DataTypes.STRING,
         allowNull: false,

@@ -58,7 +58,7 @@ router.post("/register", async (req, res) => {
     const token = signToken(user);
     return res.status(201).json({
       token,
-      user: { id: user.id, email: user.email, username: user.username, name: user.name },
+      user: { id: user.id, email: user.email, username: user.username, name: user.name, bio: user.bio || "" },
     });
   } catch (err) {
     if (err instanceof UniqueConstraintError) {
@@ -93,7 +93,7 @@ router.post("/login", async (req, res) => {
     const token = signToken(user);
     return res.json({
       token,
-      user: { id: user.id, email: user.email, username: user.username, name: user.name },
+      user: { id: user.id, email: user.email, username: user.username, name: user.name, bio: user.bio || "" },
     });
   } catch (err) {
     console.error("Login error", err);
@@ -105,12 +105,45 @@ router.get("/me", authMiddleware, async (req, res) => {
   try {
     const { User } = getModels();
     const user = await User.findByPk(req.user.id, {
-      attributes: ["id", "email", "username", "name"],
+      attributes: ["id", "email", "username", "name", "bio"],
     });
     if (!user) return res.status(404).json({ message: "User not found" });
     return res.json({ user });
   } catch (err) {
     console.error("Me error", err);
+    return res.status(500).json({ message: "Something went wrong." });
+  }
+});
+
+router.patch("/me", authMiddleware, async (req, res) => {
+  const { name, username, bio } = req.body || {};
+
+  try {
+    const { User } = getModels();
+    const user = await User.findByPk(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Check if username is being changed and if it's already taken
+    if (username && username.toLowerCase() !== user.username) {
+      const existingUsername = await User.findOne({
+        where: { username: username.toLowerCase() },
+      });
+      if (existingUsername) {
+        return res.status(409).json({ message: "Username already in use." });
+      }
+      user.username = username.toLowerCase();
+    }
+
+    if (name !== undefined) user.name = name.trim();
+    if (bio !== undefined) user.bio = bio;
+
+    await user.save();
+
+    return res.json({
+      user: { id: user.id, email: user.email, username: user.username, name: user.name, bio: user.bio || "" },
+    });
+  } catch (err) {
+    console.error("Update profile error", err);
     return res.status(500).json({ message: "Something went wrong." });
   }
 });

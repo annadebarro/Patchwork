@@ -564,18 +564,34 @@ function AccountSettings({ user, onUpdateUser }) {
     }
 
     setSaving(true);
-    // TODO: Implement API call to save changes
-    // For now, update the local user state
-    setTimeout(() => {
-      onUpdateUser((prevUser) => ({
-        ...prevUser,
-        name: formData.name,
-        username: formData.username,
-        bio: formData.bio,
-      }));
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          username: formData.username,
+          bio: formData.bio,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.message || "Failed to save changes");
+      } else {
+        onUpdateUser(data.user);
+        setMessage("Changes saved successfully!");
+      }
+    } catch (err) {
+      console.error("Update profile error", err);
+      setMessage("Network error. Please try again.");
+    } finally {
       setSaving(false);
-      setMessage("Changes saved successfully!");
-    }, 500);
+    }
   }
 
   return (
