@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -192,16 +200,19 @@ function App() {
           }
         />
         <Route
-          path="/home"
           element={
             <RequireAuth user={user}>
-              <HomeLayout user={user} onLogout={handleLogout} />
+              <AuthedLayout user={user} onLogout={handleLogout} />
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="social" replace />} />
-          <Route path="social" element={<SocialHome />} />
-          <Route path="marketplace" element={<MarketplaceHome />} />
+          <Route path="/home" element={<HomeLayout />}>
+            <Route index element={<Navigate to="social" replace />} />
+            <Route path="social" element={<SocialHome />} />
+            <Route path="marketplace" element={<MarketplaceHome />} />
+          </Route>
+          <Route path="/userpage/:username" element={<UserPage />} />
+          <Route path="/profile" element={<UserPage user={user} isOwnProfile />} />
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
       </Routes>
@@ -269,7 +280,7 @@ function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView })
               <input
                 name="emailOrUsername"
                 type="text"
-                placeholder="username"
+                placeholder="username or email"
                 required
               />
             </label>
@@ -293,21 +304,37 @@ function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView })
   );
 }
 
-function HomeLayout({ user, onLogout }) {
+function AuthedLayout({ user, onLogout }) {
+  const initial = user?.name?.charAt(0).toUpperCase() || "U";
+
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-profile">
           <div className="avatar avatar--sm">
-            {user?.name?.charAt(0).toUpperCase() || "U"}
+            {initial}
           </div>
         </div>
         <nav className="sidebar-nav">
-          <NavLink to="/home/social" className={({ isActive }) => `sidebar-icon ${isActive ? "active" : ""}`} title="Home">
+          <NavLink
+            to="/home/social"
+            className={({ isActive }) => `sidebar-icon ${isActive ? "active" : ""}`}
+            title="Home"
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
               <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
+          </NavLink>
+          <NavLink
+            to="/profile"
+            className={({ isActive }) => `sidebar-icon ${isActive ? "active" : ""}`}
+            title="My profile"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
             </svg>
           </NavLink>
           <NavLink to="/home/messages" className="sidebar-icon" title="Messages">
@@ -321,22 +348,22 @@ function HomeLayout({ user, onLogout }) {
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </NavLink>
-          <button className="sidebar-icon" title="Create Post">
+          <button className="sidebar-icon" title="Create Post" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
         </nav>
+        <button className="sidebar-logout" onClick={onLogout} type="button">
+          Log out
+        </button>
       </aside>
 
       {/* Main Content */}
       <div className="main-content">
         {/* Top Bar */}
         <header className="top-bar">
-          <div className="avatar avatar--sm">
-            {user?.name?.charAt(0).toUpperCase() || "U"}
-          </div>
           <div className="search-bar">
             <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
@@ -344,27 +371,32 @@ function HomeLayout({ user, onLogout }) {
             </svg>
             <input type="text" placeholder="Search" />
           </div>
-          <button className="avatar avatar--sm" onClick={onLogout} title="Log out">
-            {user?.name?.charAt(0).toUpperCase() || "U"}
-          </button>
         </header>
 
-        {/* Feed Tabs */}
-        <nav className="feed-tabs">
-          <NavLink to="/home/social" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
-            Social
-          </NavLink>
-          <NavLink to="/home/marketplace" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
-            Marketplace
-          </NavLink>
-        </nav>
-
-        {/* Feed Content */}
-        <div className="feed-content">
-          <Outlet />
-        </div>
+        <Outlet />
       </div>
     </div>
+  );
+}
+
+function HomeLayout() {
+  return (
+    <>
+      {/* Feed Tabs */}
+      <nav className="feed-tabs">
+        <NavLink to="/home/social" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
+          Social
+        </NavLink>
+        <NavLink to="/home/marketplace" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
+          Marketplace
+        </NavLink>
+      </nav>
+
+      {/* Feed Content */}
+      <div className="feed-content">
+        <Outlet />
+      </div>
+    </>
   );
 }
 
@@ -405,6 +437,48 @@ function MarketplaceHome() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function UserPage({ user, isOwnProfile = false }) {
+  const { username } = useParams();
+  const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
+  const displayUsername = isOwnProfile ? user?.username || "your-username" : username || "username";
+
+  return (
+    <div className="feed-content">
+      <section className="user-page">
+        <header className="user-header">
+          <div>
+            <h1 className="user-name">{displayName}</h1>
+            <p className="user-handle">@{displayUsername}</p>
+          </div>
+          {isOwnProfile && (
+            <button className="edit-profile" type="button">
+              Change account info
+            </button>
+          )}
+        </header>
+
+        <div className="user-stats">
+          <div className="stat">
+            <span className="stat-value">0</span>
+            <span className="stat-label">Followers</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">0</span>
+            <span className="stat-label">Following</span>
+          </div>
+        </div>
+
+        <section className="user-posts" aria-label="Assigned posts">
+          <h2 className="user-posts-title">Assigned posts</h2>
+          <div className="placeholder">
+            <p>No posts assigned yet.</p>
+          </div>
+        </section>
+      </section>
     </div>
   );
 }
