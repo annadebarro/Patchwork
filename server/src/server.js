@@ -73,18 +73,29 @@ app.use((err, _req, res, _next) => {
   res.status(status).json(payload);
 });
 
+let server;
+
 async function bootstrap() {
   try {
     const sequelize = await connectToDatabase(process.env.DATABASE_URL);
     initModels(sequelize);
-    await sequelize.sync();
-    app.listen(PORT, () => {
+    await sequelize.sync({ alter: true });
+
+    server = app.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
+      console.log("Server is ready to accept connections...");
     });
+
+    // Keep event loop alive
+    setInterval(() => {}, 1000 * 60 * 60);
+
   } catch (err) {
     console.error("Failed to start server:", err);
     process.exit(1);
   }
 }
 
-bootstrap();
+bootstrap().catch(err => {
+  console.error("Bootstrap error:", err);
+  process.exit(1);
+});
