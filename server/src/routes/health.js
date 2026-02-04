@@ -1,22 +1,22 @@
 const express = require("express");
-const mongoose = require("mongoose");
+const { getSequelize } = require("../config/db");
 
 const router = express.Router();
 
-const connectionStates = {
-  0: "disconnected",
-  1: "connected",
-  2: "connecting",
-  3: "disconnecting",
-  99: "uninitialized",
-};
+router.get("/", async (_req, res) => {
+  let database = "unknown";
 
-router.get("/", (_req, res) => {
-  const dbState = connectionStates[mongoose.connection.readyState] || "unknown";
+  try {
+    const sequelize = getSequelize();
+    await sequelize.authenticate();
+    database = "connected";
+  } catch (err) {
+    database = "disconnected";
+  }
 
   res.json({
     status: "ok",
-    database: dbState,
+    database,
     timestamp: new Date().toISOString(),
   });
 });

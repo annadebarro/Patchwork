@@ -53,9 +53,9 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 
 ## Getting Started
 
-- Requirements: Node.js 18+, npm, and a running MongoDB instance.
+- Requirements: Node.js 18+, npm, and a running Postgres instance.
 - Copy environment files and install dependencies:
-  - `cp server/.env.example server/.env` and update `MONGODB_URI` if needed
+  - `cp server/.env.example server/.env` and update `DATABASE_URL` if needed
   - `npm install --prefix server`
   - `npm install --prefix client`
 - Optional: set `client/.env` from `client/.env.example` when pointing the UI to a non-local API.
@@ -66,5 +66,5 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 
 ## Project Structure
 
-- `server/` — Express API with MongoDB connection (entry: `src/server.js`)
+- `server/` — Express API with Postgres (Sequelize) connection (entry: `src/server.js`)
 - `client/` — Vite + React frontend scaffolded for Patchwork

@@ -1,7 +1,8 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const User = require("../models/user");
+const { Op, UniqueConstraintError } = require("sequelize");
+const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
 
 const router = express.Router();
@@ -11,7 +12,7 @@ const SALT_ROUNDS = 10;
 function signToken(user) {
   return jwt.sign(
     {
-      id: user._id,
+      id: user.id,
       email: user.email,
       username: user.username,
       name: user.name,
@@ -33,12 +34,15 @@ router.post("/register", async (req, res) => {
   }
 
   try {
-    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    const { User } = getModels();
+    const existingEmail = await User.findOne({ where: { email: email.toLowerCase() } });
     if (existingEmail) {
       return res.status(409).json({ message: "Email already in use." });
     }
 
-    const existingUsername = await User.findOne({ username: username.toLowerCase() });
+    const existingUsername = await User.findOne({
+      where: { username: username.toLowerCase() },
+    });
     if (existingUsername) {
       return res.status(409).json({ message: "Username already in use." });
     }
@@ -54,9 +58,12 @@ router.post("/register", async (req, res) => {
     const token = signToken(user);
     return res.status(201).json({
       token,
-      user: { id: user._id, email: user.email, username: user.username, name: user.name },
+      user: { id: user.id, email: user.email, username: user.username, name: user.name },
     });
   } catch (err) {
+    if (err instanceof UniqueConstraintError) {
+      return res.status(409).json({ message: "Email or username already in use." });
+    }
     console.error("Register error", err);
     return res.status(500).json({ message: "Something went wrong." });
   }
@@ -70,9 +77,12 @@ router.post("/login", async (req, res) => {
   }
 
   try {
+    const { User } = getModels();
     const lookup = emailOrUsername.toLowerCase();
     const user = await User.findOne({
-      $or: [{ email: lookup }, { username: lookup }],
+      where: {
+        [Op.or]: [{ email: lookup }, { username: lookup }],
+      },
     });
 
     if (!user) return res.status(401).json({ message: "Invalid credentials." });
@@ -83,7 +93,7 @@ router.post("/login", async (req, res) => {
     const token = signToken(user);
     return res.json({
       token,
-      user: { id: user._id, email: user.email, username: user.username, name: user.name },
+      user: { id: user.id, email: user.email, username: user.username, name: user.name },
     });
   } catch (err) {
     console.error("Login error", err);
@@ -93,7 +103,10 @@ router.post("/login", async (req, res) => {
 
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("email username name");
+    const { User } = getModels();
+    const user = await User.findByPk(req.user.id, {
+      attributes: ["id", "email", "username", "name"],
+    });
     if (!user) return res.status(404).json({ message: "User not found" });
     return res.json({ user });
   } catch (err) {
