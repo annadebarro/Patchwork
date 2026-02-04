@@ -1,24 +1,33 @@
-const mongoose = require("mongoose");
+const { Sequelize } = require("sequelize");
+
+let sequelize;
 
 async function connectToDatabase(uri) {
   if (!uri) {
-    throw new Error("Missing MongoDB connection string (MONGODB_URI)");
+    throw new Error("Missing Postgres connection string (DATABASE_URL)");
   }
 
-  mongoose.connection.on("connected", () => {
-    // Use console for now; consider a logger later
-    console.log("MongoDB connected");
+  sequelize = new Sequelize(uri, {
+    dialect: "postgres",
+    logging: false,
   });
 
-  mongoose.connection.on("error", (err) => {
-    console.error("MongoDB connection error:", err);
-  });
+  try {
+    await sequelize.authenticate();
+    console.log("Postgres connected");
+  } catch (err) {
+    console.error("Postgres connection error:", err);
+    throw err;
+  }
 
-  mongoose.connection.on("disconnected", () => {
-    console.warn("MongoDB disconnected");
-  });
-
-  return mongoose.connect(uri);
+  return sequelize;
 }
 
-module.exports = { connectToDatabase };
+function getSequelize() {
+  if (!sequelize) {
+    throw new Error("Sequelize has not been initialized");
+  }
+  return sequelize;
+}
+
+module.exports = { connectToDatabase, getSequelize };

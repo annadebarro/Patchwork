@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { connectToDatabase } = require("./config/db");
+const { initModels } = require("./models");
 const { registerRoutes } = require("./routes");
 
 const PORT = process.env.PORT || 5000;
@@ -68,7 +69,9 @@ app.use((err, _req, res, _next) => {
 
 async function bootstrap() {
   try {
-    await connectToDatabase(process.env.MONGODB_URI);
+    const sequelize = await connectToDatabase(process.env.DATABASE_URL);
+    initModels(sequelize);
+    await sequelize.sync();
     app.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
     });
