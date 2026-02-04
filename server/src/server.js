@@ -20,22 +20,28 @@ const allowedOrigins = CLIENT_ORIGIN.split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (process.env.NODE_ENV !== "production" && LOCALHOST_ORIGIN_RE.test(origin)) {
-        return callback(null, true);
-      }
-      const err = new Error(`CORS blocked for origin: ${origin}`);
-      err.status = 403;
-      err.code = "CORS_BLOCKED";
-      return callback(err);
-    },
-    credentials: true,
-  })
-);
+const isProduction = process.env.NODE_ENV === "production";
+const corsOptions = isProduction
+  ? {
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (LOCALHOST_ORIGIN_RE.test(origin)) {
+          return callback(null, true);
+        }
+        const err = new Error(`CORS blocked for origin: ${origin}`);
+        err.status = 403;
+        err.code = "CORS_BLOCKED";
+        return callback(err);
+      },
+      credentials: true,
+    }
+  : {
+      origin: true,
+      credentials: true,
+    };
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 if (DEBUG_REQUESTS) {

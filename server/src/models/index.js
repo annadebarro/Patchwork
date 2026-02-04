@@ -66,13 +66,13 @@ function initModels(sequelize) {
       indexes: [
         {
           unique: true,
-          fields: ["followerId", "followeeId"],
+          fields: ["follower_id", "followee_id"],
         },
         {
-          fields: ["followerId"],
+          fields: ["follower_id"],
         },
         {
-          fields: ["followeeId"],
+          fields: ["followee_id"],
         },
       ],
     }
@@ -120,10 +120,10 @@ function initModels(sequelize) {
       indexes: [
         {
           unique: true,
-          fields: ["conversationId", "userId"],
+          fields: ["conversation_id", "user_id"],
         },
         {
-          fields: ["userId"],
+          fields: ["user_id"],
         },
       ],
     }
@@ -158,10 +158,10 @@ function initModels(sequelize) {
       underscored: true,
       indexes: [
         {
-          fields: ["conversationId", "createdAt"],
+          fields: ["conversation_id", "created_at"],
         },
         {
-          fields: ["senderId"],
+          fields: ["sender_id"],
         },
       ],
     }
@@ -197,10 +197,10 @@ function initModels(sequelize) {
       underscored: true,
       indexes: [
         {
-          fields: ["userId"],
+          fields: ["user_id"],
         },
         {
-          fields: ["actionType"],
+          fields: ["action_type"],
         },
       ],
     }
