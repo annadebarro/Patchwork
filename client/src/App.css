@@ -347,6 +347,13 @@ button:disabled {
   margin-bottom: 30px;
 }
 
+.patch-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--denim-dark);
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;

@@ -304,17 +304,33 @@ function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView })
   );
 }
 
-function AuthedLayout({ user, onLogout }) {
-  const initial = user?.name?.charAt(0).toUpperCase() || "U";
+function PatchLogo({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Denim background */}
+      <rect x="2" y="2" width="36" height="36" rx="4" fill="#4a6fa5" />
+      {/* Darker denim section (right side) */}
+      <path d="M24 2h12a4 4 0 0 1 4 4v30a4 4 0 0 1-4 4H24V2z" fill="#2c4a6e" />
+      {/* Sun/circle */}
+      <circle cx="14" cy="14" r="7" fill="#d4a03c" />
+      {/* Moon crescent */}
+      <circle cx="28" cy="26" r="6" fill="#a8c0d4" />
+      <circle cx="30" cy="24" r="5" fill="#2c4a6e" />
+      {/* Stitching border */}
+      <rect x="4" y="4" width="32" height="32" rx="2" stroke="#8b4513" strokeWidth="2" strokeDasharray="3 2" fill="none" />
+      {/* Zigzag stitch at bottom */}
+      <path d="M6 34 l2-2 2 2 2-2 2 2 2-2 2 2 2-2 2 2 2-2 2 2 2-2 2 2 2-2 2 2" stroke="#c4a35a" strokeWidth="1.5" fill="none" />
+    </svg>
+  );
+}
 
+function AuthedLayout({ user, onLogout }) {
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-profile">
-          <div className="avatar avatar--sm">
-            {initial}
-          </div>
+          <PatchLogo className="patch-logo" />
         </div>
         <nav className="sidebar-nav">
           <NavLink
