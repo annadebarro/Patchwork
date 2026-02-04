@@ -351,6 +351,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  flex: 1;
 }
 
 .sidebar-icon {
@@ -380,6 +381,24 @@ button:disabled {
 
 .sidebar-icon.active {
   opacity: 1;
+  color: var(--mustard);
+}
+
+.sidebar-logout {
+  margin-top: auto;
+  margin-bottom: 16px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--cream);
+  font-family: 'Special Elite', cursive;
+  font-size: 0.85rem;
+  text-transform: lowercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.sidebar-logout:hover {
   color: var(--mustard);
 }
 

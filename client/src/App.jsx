@@ -280,7 +280,7 @@ function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView })
               <input
                 name="emailOrUsername"
                 type="text"
-                placeholder="username"
+                placeholder="username or email"
                 required
               />
             </label>
@@ -355,15 +355,15 @@ function AuthedLayout({ user, onLogout }) {
             </svg>
           </button>
         </nav>
+        <button className="sidebar-logout" onClick={onLogout} type="button">
+          Log out
+        </button>
       </aside>
 
       {/* Main Content */}
       <div className="main-content">
         {/* Top Bar */}
         <header className="top-bar">
-          <div className="avatar avatar--sm">
-            {initial}
-          </div>
           <div className="search-bar">
             <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
@@ -371,9 +371,6 @@ function AuthedLayout({ user, onLogout }) {
             </svg>
             <input type="text" placeholder="Search" />
           </div>
-          <button className="avatar avatar--sm" onClick={onLogout} title="Log out" type="button">
-            {initial}
-          </button>
         </header>
 
         <Outlet />
