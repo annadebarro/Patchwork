@@ -2,6 +2,16 @@ const { DataTypes } = require("sequelize");
 
 let models;
 
+function createDefaultSizePreferences() {
+  return {
+    tops: [],
+    bottoms: [],
+    dresses: [],
+    outerwear: [],
+    shoes: [],
+  };
+}
+
 function initModels(sequelize) {
   if (models) return models;
 
@@ -31,6 +41,30 @@ function initModels(sequelize) {
         type: DataTypes.TEXT,
         allowNull: true,
         defaultValue: "",
+      },
+      sizePreferences: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: createDefaultSizePreferences,
+        field: "size_preferences",
+      },
+      favoriteBrands: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+        field: "favorite_brands",
+      },
+      onboardingStatus: {
+        type: DataTypes.ENUM("pending", "completed", "skipped"),
+        allowNull: false,
+        defaultValue: "pending",
+        field: "onboarding_status",
+      },
+      onboardingPromptSeen: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "onboarding_prompt_seen",
       },
       passwordHash: {
         type: DataTypes.STRING,

@@ -1,16 +1,45 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   NavLink,
   Outlet,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
 import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+const MAX_SIZE_ENTRIES_PER_CATEGORY = 10;
+const SIZE_CATEGORIES = [
+  { key: "tops", label: "Tops" },
+  { key: "bottoms", label: "Bottoms" },
+  { key: "dresses", label: "Dresses" },
+  { key: "outerwear", label: "Outerwear" },
+  { key: "shoes", label: "Shoes" },
+];
+const SEEDED_BRANDS = [
+  "Nike",
+  "Adidas",
+  "Levi's",
+  "Zara",
+  "H&M",
+  "Uniqlo",
+  "Madewell",
+  "Aritzia",
+  "Lululemon",
+  "Patagonia",
+  "The North Face",
+  "Carhartt",
+  "New Balance",
+  "Converse",
+  "Doc Martens",
+  "Reformation",
+  "Everlane",
+  "Urban Outfitters",
+];
 
 // Sample images for collage (placeholder fashion photos)
 const collageImages = [
@@ -32,13 +61,140 @@ const samplePosts = [
   { id: 8, image: "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=500&fit=crop", forSale: false },
 ];
 
+function createEmptySizePreferences() {
+  return {
+    tops: [],
+    bottoms: [],
+    dresses: [],
+    outerwear: [],
+    shoes: [],
+  };
+}
+
+function normalizeSizePreferences(rawSizePreferences) {
+  const normalized = createEmptySizePreferences();
+  if (!rawSizePreferences || typeof rawSizePreferences !== "object" || Array.isArray(rawSizePreferences)) {
+    return normalized;
+  }
+
+  for (const category of SIZE_CATEGORIES) {
+    const rawEntries = rawSizePreferences[category.key];
+    if (!Array.isArray(rawEntries)) continue;
+
+    normalized[category.key] = rawEntries
+      .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+      .map((entry) => {
+        const label = typeof entry.label === "string" ? entry.label.trim() : "";
+        if (!label) return null;
+
+        return {
+          label,
+          measurementName:
+            typeof entry.measurementName === "string" ? entry.measurementName : "",
+          measurementValue:
+            entry.measurementValue !== undefined && entry.measurementValue !== null
+              ? String(entry.measurementValue)
+              : "",
+          measurementUnit: entry.measurementUnit === "cm" ? "cm" : "in",
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return normalized;
+}
+
+function normalizeFavoriteBrands(rawBrands) {
+  if (!Array.isArray(rawBrands)) return [];
+
+  const seen = new Set();
+  const cleaned = [];
+
+  for (const brand of rawBrands) {
+    if (typeof brand !== "string") continue;
+    const trimmed = brand.trim();
+    if (!trimmed) continue;
+
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(trimmed);
+  }
+
+  return cleaned;
+}
+
+function toSizePreferencesApiPayload(sizePreferences) {
+  const payload = createEmptySizePreferences();
+
+  for (const category of SIZE_CATEGORIES) {
+    const rawEntries = Array.isArray(sizePreferences?.[category.key])
+      ? sizePreferences[category.key]
+      : [];
+
+    payload[category.key] = rawEntries.slice(0, MAX_SIZE_ENTRIES_PER_CATEGORY)
+      .map((entry) => {
+        const label = typeof entry?.label === "string" ? entry.label.trim() : "";
+        if (!label) return null;
+
+        const normalizedEntry = { label };
+
+        const measurementName =
+          typeof entry.measurementName === "string" ? entry.measurementName.trim() : "";
+        if (measurementName) normalizedEntry.measurementName = measurementName;
+
+        const measurementValueRaw = entry.measurementValue;
+        if (
+          measurementValueRaw !== undefined &&
+          measurementValueRaw !== null &&
+          String(measurementValueRaw).trim() !== ""
+        ) {
+          const measurementValue = Number(measurementValueRaw);
+          if (Number.isFinite(measurementValue) && measurementValue > 0) {
+            normalizedEntry.measurementValue = measurementValue;
+            normalizedEntry.measurementUnit = entry.measurementUnit === "cm" ? "cm" : "in";
+          }
+        }
+
+        return normalizedEntry;
+      })
+      .filter(Boolean);
+  }
+
+  return payload;
+}
+
+async function parseApiResponse(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      return await res.json();
+    } catch (err) {
+      console.error("Failed to parse JSON response", err);
+      return null;
+    }
+  }
+
+  try {
+    const text = await res.text();
+    return text ? { message: text } : null;
+  } catch (err) {
+    console.error("Failed to read response body", err);
+    return null;
+  }
+}
+
 function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [authView, setAuthView] = useState("login");
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptError, setPromptError] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -52,14 +208,19 @@ function App() {
         const res = await fetch(`${API_BASE_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) {
-          const data = await res.json();
+
+        const data = await parseApiResponse(res);
+        if (res.ok && data?.user) {
           setUser(data.user);
+          setShowOnboardingPrompt(Boolean(data.user.shouldShowOnboardingPrompt));
+          setPromptError("");
         } else {
           localStorage.removeItem("token");
+          setShowOnboardingPrompt(false);
         }
       } catch {
         localStorage.removeItem("token");
+        setShowOnboardingPrompt(false);
       } finally {
         setCheckingAuth(false);
       }
@@ -67,26 +228,6 @@ function App() {
 
     fetchMe();
   }, []);
-
-  async function parseResponse(res) {
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      try {
-        return await res.json();
-      } catch (err) {
-        console.error("Failed to parse JSON response", err);
-        return null;
-      }
-    }
-
-    try {
-      const text = await res.text();
-      return text ? { message: text } : null;
-    } catch (err) {
-      console.error("Failed to read response body", err);
-      return null;
-    }
-  }
 
   async function handleSignup(event) {
     event.preventDefault();
@@ -104,7 +245,7 @@ function App() {
         body: JSON.stringify(payload),
       });
 
-      const data = await parseResponse(res);
+      const data = await parseApiResponse(res);
       if (!res.ok) {
         const message = data?.message || `Request failed (${res.status})`;
         setError(message);
@@ -112,7 +253,9 @@ function App() {
       } else {
         localStorage.setItem("token", data.token);
         setUser(data.user);
-        navigate("/home/social", { replace: true });
+        setShowOnboardingPrompt(false);
+        setPromptError("");
+        navigate("/onboarding/preferences", { replace: true });
       }
     } catch (err) {
       console.error("Signup network error", err);
@@ -138,7 +281,7 @@ function App() {
         body: JSON.stringify(payload),
       });
 
-      const data = await parseResponse(res);
+      const data = await parseApiResponse(res);
       if (!res.ok) {
         const message = data?.message || `Request failed (${res.status})`;
         setError(message);
@@ -146,6 +289,8 @@ function App() {
       } else {
         localStorage.setItem("token", data.token);
         setUser(data.user);
+        setShowOnboardingPrompt(Boolean(data.user?.shouldShowOnboardingPrompt));
+        setPromptError("");
         navigate("/home/social", { replace: true });
       }
     } catch (err) {
@@ -160,12 +305,59 @@ function App() {
     localStorage.removeItem("token");
     setUser(null);
     setAuthView("login");
+    setShowOnboardingPrompt(false);
+    setPromptError("");
     navigate("/", { replace: true });
   }
 
   function handleSwitchView(nextView) {
     setError("");
     setAuthView(nextView);
+  }
+
+  function handlePromptSetupNow() {
+    setPromptError("");
+    setShowOnboardingPrompt(false);
+    navigate("/onboarding/preferences");
+  }
+
+  async function handlePromptSkip() {
+    if (promptSaving) return;
+
+    setPromptSaving(true);
+    setPromptError("");
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setPromptSaving(false);
+      setPromptError("You are no longer logged in.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "skip" }),
+      });
+
+      const data = await parseApiResponse(res);
+      if (!res.ok) {
+        const message = data?.message || `Request failed (${res.status})`;
+        setPromptError(message);
+      } else {
+        setUser(data.user);
+        setShowOnboardingPrompt(false);
+      }
+    } catch (err) {
+      console.error("Skip onboarding prompt failed", err);
+      setPromptError("Network error. Please try again.");
+    } finally {
+      setPromptSaving(false);
+    }
   }
 
   if (checkingAuth) {
@@ -178,6 +370,11 @@ function App() {
       </div>
     );
   }
+
+  const shouldRenderPrompt =
+    Boolean(user) &&
+    showOnboardingPrompt &&
+    !location.pathname.startsWith("/onboarding");
 
   return (
     <main className={`shell ${user ? "shell--home" : "shell--auth"}`}>
@@ -200,9 +397,21 @@ function App() {
           }
         />
         <Route
+          path="/onboarding/preferences"
           element={
             <RequireAuth user={user}>
-              <AuthedLayout user={user} onLogout={handleLogout} />
+              <OnboardingPreferencesPage
+                user={user}
+                onUpdateUser={setUser}
+                onDismissPrompt={() => setShowOnboardingPrompt(false)}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          element={
+            <RequireAuth user={user}>
+              <AuthedLayout onLogout={handleLogout} />
             </RequireAuth>
           }
         >
@@ -217,6 +426,15 @@ function App() {
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
       </Routes>
+
+      {shouldRenderPrompt && (
+        <OnboardingPrompt
+          onSetupNow={handlePromptSetupNow}
+          onSkip={handlePromptSkip}
+          loading={promptSaving}
+          error={promptError}
+        />
+      )}
     </main>
   );
 }
@@ -305,6 +523,31 @@ function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView })
   );
 }
 
+function OnboardingPrompt({ onSetupNow, onSkip, loading, error }) {
+  return (
+    <div className="onboarding-prompt-backdrop" role="dialog" aria-modal="true">
+      <div className="onboarding-prompt-card">
+        <h2 className="onboarding-prompt-title">Complete your profile setup</h2>
+        <p className="onboarding-prompt-text">
+          Add your bio, fit preferences, and favorite brands now, or skip and do it later in
+          settings.
+        </p>
+
+        {error && <div className="settings-message error">{error}</div>}
+
+        <div className="onboarding-prompt-actions">
+          <button type="button" className="save-button" onClick={onSetupNow} disabled={loading}>
+            Set up now
+          </button>
+          <button type="button" className="cancel-button" onClick={onSkip} disabled={loading}>
+            {loading ? "Skipping..." : "Skip for now"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PatchLogo({ className }) {
   return (
     <svg className={className} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -325,7 +568,7 @@ function PatchLogo({ className }) {
   );
 }
 
-function AuthedLayout({ user, onLogout }) {
+function AuthedLayout({ onLogout }) {
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
@@ -439,7 +682,8 @@ function SocialHome() {
 }
 
 function MarketplaceHome() {
-  const marketplacePosts = samplePosts.filter(p => p.forSale);
+  const marketplacePosts = samplePosts.filter((post) => post.forSale);
+
   return (
     <div className="masonry-grid">
       {marketplacePosts.map((post) => (
@@ -526,6 +770,380 @@ function UserPage({ user, isOwnProfile = false }) {
   );
 }
 
+function SizePreferencesEditor({ sizePreferences, setSizePreferences }) {
+  function updateEntry(categoryKey, index, field, value) {
+    setSizePreferences((prev) => {
+      const existing = Array.isArray(prev[categoryKey]) ? prev[categoryKey] : [];
+      const nextEntries = [...existing];
+      nextEntries[index] = {
+        ...nextEntries[index],
+        [field]: value,
+      };
+
+      return {
+        ...prev,
+        [categoryKey]: nextEntries,
+      };
+    });
+  }
+
+  function addEntry(categoryKey) {
+    setSizePreferences((prev) => {
+      const existing = Array.isArray(prev[categoryKey]) ? prev[categoryKey] : [];
+      if (existing.length >= MAX_SIZE_ENTRIES_PER_CATEGORY) return prev;
+
+      return {
+        ...prev,
+        [categoryKey]: [
+          ...existing,
+          {
+            label: "",
+            measurementName: "",
+            measurementValue: "",
+            measurementUnit: "in",
+          },
+        ],
+      };
+    });
+  }
+
+  function removeEntry(categoryKey, index) {
+    setSizePreferences((prev) => {
+      const existing = Array.isArray(prev[categoryKey]) ? prev[categoryKey] : [];
+      return {
+        ...prev,
+        [categoryKey]: existing.filter((_, entryIndex) => entryIndex !== index),
+      };
+    });
+  }
+
+  return (
+    <div className="size-preferences-grid">
+      {SIZE_CATEGORIES.map((category) => {
+        const entries = Array.isArray(sizePreferences[category.key])
+          ? sizePreferences[category.key]
+          : [];
+
+        return (
+          <div key={category.key} className="size-category-card">
+            <div className="size-category-header">
+              <h3>{category.label}</h3>
+              <button
+                type="button"
+                className="size-add"
+                onClick={() => addEntry(category.key)}
+                disabled={entries.length >= MAX_SIZE_ENTRIES_PER_CATEGORY}
+              >
+                Add size
+              </button>
+            </div>
+
+            {entries.length === 0 ? (
+              <p className="size-category-empty">No sizes added yet.</p>
+            ) : (
+              entries.map((entry, index) => (
+                <div key={`${category.key}-${index}`} className="size-entry-row">
+                  <label className="settings-label">
+                    <span>Size label</span>
+                    <input
+                      type="text"
+                      value={entry.label}
+                      onChange={(event) =>
+                        updateEntry(category.key, index, "label", event.target.value)
+                      }
+                      placeholder="S, M, 8, 30x32"
+                    />
+                  </label>
+
+                  <label className="settings-label">
+                    <span>Measurement name (optional)</span>
+                    <input
+                      type="text"
+                      value={entry.measurementName}
+                      onChange={(event) =>
+                        updateEntry(category.key, index, "measurementName", event.target.value)
+                      }
+                      placeholder="Chest, waist, inseam"
+                    />
+                  </label>
+
+                  <div className="size-measurement-fields">
+                    <label className="settings-label">
+                      <span>Measurement value</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={entry.measurementValue}
+                        onChange={(event) =>
+                          updateEntry(category.key, index, "measurementValue", event.target.value)
+                        }
+                        placeholder="38"
+                      />
+                    </label>
+
+                    <label className="settings-label">
+                      <span>Unit</span>
+                      <select
+                        value={entry.measurementUnit || "in"}
+                        onChange={(event) =>
+                          updateEntry(category.key, index, "measurementUnit", event.target.value)
+                        }
+                      >
+                        <option value="in">in</option>
+                        <option value="cm">cm</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="size-remove"
+                    onClick={() => removeEntry(category.key, index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BrandPreferencesEditor({
+  favoriteBrands,
+  setFavoriteBrands,
+  customBrand,
+  setCustomBrand,
+}) {
+  const selectedBrandSet = useMemo(
+    () => new Set(favoriteBrands.map((brand) => brand.toLowerCase())),
+    [favoriteBrands]
+  );
+
+  function toggleSeededBrand(brand) {
+    const key = brand.toLowerCase();
+
+    setFavoriteBrands((prev) => {
+      if (prev.some((item) => item.toLowerCase() === key)) {
+        return prev.filter((item) => item.toLowerCase() !== key);
+      }
+      return normalizeFavoriteBrands([...prev, brand]);
+    });
+  }
+
+  function addCustomBrand() {
+    const trimmed = customBrand.trim();
+    if (!trimmed) return;
+
+    setFavoriteBrands((prev) => normalizeFavoriteBrands([...prev, trimmed]));
+    setCustomBrand("");
+  }
+
+  function removeBrand(brandToRemove) {
+    const key = brandToRemove.toLowerCase();
+    setFavoriteBrands((prev) => prev.filter((brand) => brand.toLowerCase() !== key));
+  }
+
+  return (
+    <div className="brand-survey">
+      <div className="brand-chip-grid">
+        {SEEDED_BRANDS.map((brand) => {
+          const selected = selectedBrandSet.has(brand.toLowerCase());
+          return (
+            <button
+              key={brand}
+              type="button"
+              className={`brand-chip ${selected ? "selected" : ""}`}
+              onClick={() => toggleSeededBrand(brand)}
+            >
+              {brand}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="brand-custom-row">
+        <input
+          type="text"
+          value={customBrand}
+          onChange={(event) => setCustomBrand(event.target.value)}
+          placeholder="Add custom brand"
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addCustomBrand();
+            }
+          }}
+        />
+        <button type="button" className="size-add" onClick={addCustomBrand}>
+          Add
+        </button>
+      </div>
+
+      {favoriteBrands.length > 0 ? (
+        <div className="brand-selected-list">
+          {favoriteBrands.map((brand) => (
+            <span key={brand} className="brand-selected-item">
+              {brand}
+              <button type="button" onClick={() => removeBrand(brand)}>
+                remove
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="size-category-empty">No favorite brands selected.</p>
+      )}
+    </div>
+  );
+}
+
+function OnboardingPreferencesPage({ user, onUpdateUser, onDismissPrompt }) {
+  const navigate = useNavigate();
+  const [bio, setBio] = useState(user?.bio || "");
+  const [sizePreferences, setSizePreferences] = useState(() =>
+    normalizeSizePreferences(user?.sizePreferences)
+  );
+  const [favoriteBrands, setFavoriteBrands] = useState(() =>
+    normalizeFavoriteBrands(user?.favoriteBrands)
+  );
+  const [customBrand, setCustomBrand] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setBio(user?.bio || "");
+    setSizePreferences(normalizeSizePreferences(user?.sizePreferences));
+    setFavoriteBrands(normalizeFavoriteBrands(user?.favoriteBrands));
+    setCustomBrand("");
+  }, [user]);
+
+  async function submitOnboarding(action) {
+    setMessage("");
+    setSaving(true);
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setSaving(false);
+      setMessage("You are no longer logged in.");
+      return;
+    }
+
+    const payload =
+      action === "complete"
+        ? {
+            action,
+            bio,
+            sizePreferences: toSizePreferencesApiPayload(sizePreferences),
+            favoriteBrands: normalizeFavoriteBrands(favoriteBrands),
+          }
+        : { action };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await parseApiResponse(res);
+      if (!res.ok) {
+        setMessage(data?.message || "Failed to save onboarding preferences.");
+      } else {
+        onUpdateUser(data.user);
+        onDismissPrompt();
+        navigate("/home/social", { replace: true });
+      }
+    } catch (err) {
+      console.error("Onboarding submit failed", err);
+      setMessage("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleComplete(event) {
+    event.preventDefault();
+    submitOnboarding("complete");
+  }
+
+  return (
+    <div className="onboarding-shell">
+      <section className="onboarding-page">
+        <header className="settings-header">
+          <h1 className="settings-title">Finish your profile setup</h1>
+          <p className="onboarding-subtitle">
+            Add as much or as little as you want. You can always update this later in settings.
+          </p>
+        </header>
+
+        <form className="onboarding-form" onSubmit={handleComplete}>
+          {message && (
+            <div className={`settings-message ${message.includes("success") ? "success" : "error"}`}>
+              {message}
+            </div>
+          )}
+
+          <div className="settings-section">
+            <h2 className="settings-section-title">Bio</h2>
+            <label className="settings-label">
+              <span>Tell people about your style (optional)</span>
+              <textarea
+                value={bio}
+                onChange={(event) => setBio(event.target.value)}
+                placeholder="Vintage denim collector, minimalist wardrobe, etc."
+                rows={4}
+              />
+            </label>
+          </div>
+
+          <div className="settings-section">
+            <h2 className="settings-section-title">Fit preferences</h2>
+            <p className="field-note">
+              Private to your account. Used for future personalized search and recommendations.
+            </p>
+            <SizePreferencesEditor
+              sizePreferences={sizePreferences}
+              setSizePreferences={setSizePreferences}
+            />
+          </div>
+
+          <div className="settings-section">
+            <h2 className="settings-section-title">Favorite brands (optional)</h2>
+            <BrandPreferencesEditor
+              favoriteBrands={favoriteBrands}
+              setFavoriteBrands={setFavoriteBrands}
+              customBrand={customBrand}
+              setCustomBrand={setCustomBrand}
+            />
+          </div>
+
+          <div className="settings-actions onboarding-actions">
+            <button type="submit" className="save-button" disabled={saving}>
+              {saving ? "Saving..." : "Save and continue"}
+            </button>
+            <button
+              type="button"
+              className="cancel-button"
+              onClick={() => submitOnboarding("skip")}
+              disabled={saving}
+            >
+              Skip for now
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function AccountSettings({ user, onUpdateUser }) {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -536,26 +1154,45 @@ function AccountSettings({ user, onUpdateUser }) {
     newPassword: "",
     confirmPassword: "",
   });
-  const [profilePicture, setProfilePicture] = useState(null);
+  const [sizePreferences, setSizePreferences] = useState(() =>
+    normalizeSizePreferences(user?.sizePreferences)
+  );
+  const [favoriteBrands, setFavoriteBrands] = useState(() =>
+    normalizeFavoriteBrands(user?.favoriteBrands)
+  );
+  const [customBrand, setCustomBrand] = useState("");
   const [previewUrl, setPreviewUrl] = useState(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  function handleChange(e) {
-    const { name, value } = e.target;
+  useEffect(() => {
+    setFormData({
+      name: user?.name || "",
+      username: user?.username || "",
+      bio: user?.bio || "",
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+    setSizePreferences(normalizeSizePreferences(user?.sizePreferences));
+    setFavoriteBrands(normalizeFavoriteBrands(user?.favoriteBrands));
+    setCustomBrand("");
+  }, [user]);
+
+  function handleChange(event) {
+    const { name, value } = event.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   }
 
-  function handleFileChange(e) {
-    const file = e.target.files[0];
+  function handleFileChange(event) {
+    const file = event.target.files[0];
     if (file) {
-      setProfilePicture(file);
       setPreviewUrl(URL.createObjectURL(file));
     }
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSubmit(event) {
+    event.preventDefault();
     setMessage("");
 
     if (formData.newPassword && formData.newPassword !== formData.confirmPassword) {
@@ -576,12 +1213,14 @@ function AccountSettings({ user, onUpdateUser }) {
           name: formData.name,
           username: formData.username,
           bio: formData.bio,
+          sizePreferences: toSizePreferencesApiPayload(sizePreferences),
+          favoriteBrands: normalizeFavoriteBrands(favoriteBrands),
         }),
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) {
-        setMessage(data.message || "Failed to save changes");
+        setMessage(data?.message || "Failed to save changes");
       } else {
         onUpdateUser(data.user);
         setMessage("Changes saved successfully!");
@@ -679,6 +1318,25 @@ function AccountSettings({ user, onUpdateUser }) {
                 rows={3}
               />
             </label>
+          </div>
+
+          {/* Fit + Style Preferences */}
+          <div className="settings-section">
+            <h2 className="settings-section-title">Fit and style preferences</h2>
+            <p className="field-note">
+              Private to your account. Used for future personalized search and recommendations.
+            </p>
+            <SizePreferencesEditor
+              sizePreferences={sizePreferences}
+              setSizePreferences={setSizePreferences}
+            />
+            <h3 className="settings-subtitle">Favorite brands</h3>
+            <BrandPreferencesEditor
+              favoriteBrands={favoriteBrands}
+              setFavoriteBrands={setFavoriteBrands}
+              customBrand={customBrand}
+              setCustomBrand={setCustomBrand}
+            />
           </div>
 
           {/* Password */}
