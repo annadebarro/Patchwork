@@ -420,15 +420,15 @@ button:disabled {
       0deg,
       transparent,
       transparent 2px,
-      rgba(255,255,255,0.03) 2px,
-      rgba(255,255,255,0.03) 4px
+      rgba(255,255,255,0.05) 2px,
+      rgba(255,255,255,0.05) 4px
     ),
     repeating-linear-gradient(
       90deg,
       transparent,
       transparent 2px,
-      rgba(255,255,255,0.02) 2px,
-      rgba(255,255,255,0.02) 4px
+      rgba(255,255,255,0.04) 2px,
+      rgba(255,255,255,0.04) 4px
     );
   border-right: 4px solid var(--denim-mid);
   display: flex;
@@ -702,16 +702,16 @@ button:disabled {
     repeating-linear-gradient(
       0deg,
       transparent,
-      transparent 1px,
-      rgba(255,255,255,0.03) 1px,
-      rgba(255,255,255,0.03) 2px
+      transparent 2px,
+      rgba(255,255,255,0.05) 2px,
+      rgba(255,255,255,0.05) 4px
     ),
     repeating-linear-gradient(
       90deg,
       transparent,
-      transparent 1px,
-      rgba(0,0,0,0.03) 1px,
-      rgba(0,0,0,0.03) 2px
+      transparent 2px,
+      rgba(255,255,255,0.04) 2px,
+      rgba(255,255,255,0.04) 4px
     );
   pointer-events: none;
   border-radius: 2px;
@@ -929,6 +929,21 @@ button:disabled {
   width: 70px;
   height: 70px;
   background: var(--denim-mid);
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255,255,255,0.05) 2px,
+      rgba(255,255,255,0.05) 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 2px,
+      rgba(255,255,255,0.04) 2px,
+      rgba(255,255,255,0.04) 4px
+    );
   border: 3px solid var(--denim-dark);
   border-radius: 4px;
   padding: 4px;
