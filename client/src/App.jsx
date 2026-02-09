@@ -41,13 +41,8 @@ const SEEDED_BRANDS = [
   "Urban Outfitters",
 ];
 
-// Sample images for collage (placeholder fashion photos)
-const collageImages = [
-  "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=400&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=400&h=400&fit=crop",
-  "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=400&h=400&fit=crop",
-];
+// Reference images for login collage
+const collageImages = ["/ref2.jpg", "/ref1.jpg", "/ref4.jpg", "/ref3.jpg"];
 
 // Sample feed posts
 const samplePosts = [
@@ -449,75 +444,78 @@ function RequireAuth({ user, children }) {
 function AuthPage({ authView, error, loading, onLogin, onSignup, onSwitchView }) {
   return (
     <div className="auth-container">
-      {/* Left side - Photo collage */}
-      <div className="photo-collage">
-        <div className="collage-grid">
+      <div className="auth-logo auth-logo--corner">
+        <img className="auth-logo-icon" src="/logo1.jpg" alt="Patchwork logo" />
+      </div>
+      <div className="auth-left">
+        <div className="photo-collage photo-collage--cycle">
           {collageImages.map((src, index) => (
-            <div key={index} className="collage-item">
+            <figure key={src} className={`photo-card photo-card--${index + 1}`}>
               <img src={src} alt={`Fashion ${index + 1}`} />
-            </div>
+            </figure>
           ))}
         </div>
       </div>
 
-      {/* Right side - Auth form */}
-      <div className="auth-form-container">
-        <h2 className="auth-title">
-          {authView === "login" ? "Log into Patchwork" : "Create an account"}
-        </h2>
+      <div className="auth-right">
+        <div className="auth-panel">
+          <h2 className="auth-title">
+            {authView === "login" ? "Log into Patchwork" : "Create an account"}
+          </h2>
 
-        {error && <div className="error">{error}</div>}
+          {error && <div className="error">{error}</div>}
 
-        {authView === "signup" ? (
-          <form className="form" onSubmit={onSignup}>
-            <label>
-              <input name="name" type="text" placeholder="name" required />
-            </label>
-            <label>
-              <input name="email" type="email" placeholder="email" required />
-            </label>
-            <label>
-              <input name="username" type="text" placeholder="username" required />
-            </label>
-            <label>
-              <input name="password" type="password" placeholder="password" required minLength={8} />
-            </label>
-            <button type="submit" disabled={loading}>
-              {loading ? "creating..." : "create account"}
-            </button>
-            <button
-              type="button"
-              className="switch-auth"
-              onClick={() => onSwitchView("login")}
-            >
-              log in
-            </button>
-          </form>
-        ) : (
-          <form className="form" onSubmit={onLogin}>
-            <label>
-              <input
-                name="emailOrUsername"
-                type="text"
-                placeholder="username or email"
-                required
-              />
-            </label>
-            <label>
-              <input name="password" type="password" placeholder="password" required />
-            </label>
-            <button type="submit" disabled={loading}>
-              {loading ? "logging in..." : "log in"}
-            </button>
-            <button
-              type="button"
-              className="switch-auth"
-              onClick={() => onSwitchView("signup")}
-            >
-              create an account
-            </button>
-          </form>
-        )}
+          {authView === "signup" ? (
+            <form className="form" onSubmit={onSignup}>
+              <label>
+                <input name="name" type="text" placeholder="name" required />
+              </label>
+              <label>
+                <input name="email" type="email" placeholder="email" required />
+              </label>
+              <label>
+                <input name="username" type="text" placeholder="username" required />
+              </label>
+              <label>
+                <input name="password" type="password" placeholder="password" required minLength={8} />
+              </label>
+              <button type="submit" className="auth-primary" disabled={loading}>
+                {loading ? "creating..." : "create account"}
+              </button>
+              <button
+                type="button"
+                className="switch-auth auth-secondary"
+                onClick={() => onSwitchView("login")}
+              >
+                log in
+              </button>
+            </form>
+          ) : (
+            <form className="form" onSubmit={onLogin}>
+              <label>
+                <input
+                  name="emailOrUsername"
+                  type="text"
+                  placeholder="username"
+                  required
+                />
+              </label>
+              <label>
+                <input name="password" type="password" placeholder="password" required />
+              </label>
+              <button type="submit" className="auth-primary auth-primary--circle" disabled={loading}>
+                {loading ? "..." : "log in"}
+              </button>
+              <button
+                type="button"
+                className="switch-auth auth-secondary"
+                onClick={() => onSwitchView("signup")}
+              >
+                create an account
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

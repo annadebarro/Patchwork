@@ -1,0 +1,34 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <defs>
+    <pattern id="denim" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="8" height="8" fill="#2a3b5b"/>
+      <rect width="2" height="8" fill="#32476b"/>
+    </pattern>
+  </defs>
+  <rect width="80" height="80" fill="none"/>
+  <rect x="0" y="0" width="80" height="80" fill="none"/>
+  <rect x="0" y="0" width="80" height="18" fill="url(#denim)" opacity="0.9"/>
+  <rect x="0" y="0" width="18" height="80" fill="url(#denim)" opacity="0.9"/>
+  <rect x="0" y="0" width="80" height="18" fill="none" stroke="#1b263b" stroke-width="3"/>
+  <rect x="0" y="0" width="18" height="80" fill="none" stroke="#1b263b" stroke-width="3"/>
+  <!-- stitches along top -->
+  <g stroke="#d8c58c" stroke-width="2" stroke-linecap="round">
+    <line x1="8" y1="6" x2="14" y2="12"/>
+    <line x1="18" y1="6" x2="24" y2="12"/>
+    <line x1="28" y1="6" x2="34" y2="12"/>
+    <line x1="38" y1="6" x2="44" y2="12"/>
+    <line x1="48" y1="6" x2="54" y2="12"/>
+    <line x1="58" y1="6" x2="64" y2="12"/>
+    <line x1="68" y1="6" x2="74" y2="12"/>
+  </g>
+  <!-- stitches along left -->
+  <g stroke="#d8c58c" stroke-width="2" stroke-linecap="round">
+    <line x1="6" y1="8" x2="12" y2="14"/>
+    <line x1="6" y1="18" x2="12" y2="24"/>
+    <line x1="6" y1="28" x2="12" y2="34"/>
+    <line x1="6" y1="38" x2="12" y2="44"/>
+    <line x1="6" y1="48" x2="12" y2="54"/>
+    <line x1="6" y1="58" x2="12" y2="64"/>
+    <line x1="6" y1="68" x2="12" y2="74"/>
+  </g>
+</svg>
