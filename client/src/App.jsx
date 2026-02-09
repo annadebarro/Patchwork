@@ -406,7 +406,7 @@ function App() {
         <Route
           element={
             <RequireAuth user={user}>
-              <AuthedLayout onLogout={handleLogout} />
+              <AuthedLayout onLogout={handleLogout} user={user} />
             </RequireAuth>
           }
         >
@@ -566,7 +566,7 @@ function PatchLogo({ className }) {
   );
 }
 
-function AuthedLayout({ onLogout }) {
+function AuthedLayout({ onLogout, user }) {
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
@@ -629,6 +629,7 @@ function AuthedLayout({ onLogout }) {
             </svg>
             <input type="text" placeholder="Search" />
           </div>
+          <ProfileAvatar name={user?.name} size="sm" imageUrl={user?.avatarUrl} />
         </header>
 
         <Outlet />
@@ -711,56 +712,77 @@ function ProfilePatch({ name }) {
   );
 }
 
+function ProfileAvatar({ name, size = "md", imageUrl }) {
+  const initial = name?.charAt(0).toUpperCase() || "?";
+  return (
+    <div className={`profile-avatar profile-avatar--${size}`} aria-hidden="true">
+      {imageUrl ? <img src={imageUrl} alt="" /> : <span>{initial}</span>}
+    </div>
+  );
+}
+
 function UserPage({ user, isOwnProfile = false }) {
   const { username } = useParams();
   const navigate = useNavigate();
   const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
   const displayUsername = isOwnProfile ? user?.username || "your-username" : username || "username";
-  const displayBio = isOwnProfile ? user?.bio || "" : "";
+  const galleryPosts = samplePosts.slice(0, 4);
 
   return (
     <div className="feed-content">
       <section className="user-page">
-        <header className="user-header">
-          <ProfilePatch name={displayName} />
-          <div className="user-header-info">
-            <h1 className="user-name">{displayName}</h1>
-            <p className="user-handle">@{displayUsername}</p>
-          </div>
-          {isOwnProfile && (
-            <button
-              className="edit-profile"
-              type="button"
-              onClick={() => navigate("/settings")}
-            >
-              Change account info
+        <section className="profile-hero">
+          <ProfileAvatar name={displayName} size="lg" imageUrl={user?.avatarUrl} />
+          <h1 className="profile-name">{displayUsername}</h1>
+          <div className="profile-actions">
+            {isOwnProfile && (
+              <button
+                className="profile-action"
+                type="button"
+                onClick={() => navigate("/settings")}
+              >
+                edit profile
+              </button>
+            )}
+            <button className="profile-action" type="button">
+              view archive
             </button>
-          )}
-        </header>
-
-        <div className="user-stats">
-          <div className="stat">
-            <span className="stat-value">0</span>
-            <span className="stat-label">Followers</span>
           </div>
-          <div className="stat">
-            <span className="stat-value">0</span>
-            <span className="stat-label">Following</span>
-          </div>
-        </div>
+        </section>
 
-        <div className="user-bio">
-          {displayBio ? (
-            <p className="user-bio-text">{displayBio}</p>
-          ) : (
-            <p className="user-bio-empty">No bio yet</p>
-          )}
-        </div>
+        <nav className="profile-tabs" aria-label="Profile tabs">
+          <button type="button" className="profile-tab active" aria-label="Grid view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="4" y="4" width="6" height="6" />
+              <rect x="14" y="4" width="6" height="6" />
+              <rect x="4" y="14" width="6" height="6" />
+              <rect x="14" y="14" width="6" height="6" />
+            </svg>
+          </button>
+          <button type="button" className="profile-tab" aria-label="Favorites">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 3l3 6 6 1-4.5 4.5 1.2 6.5L12 17l-5.7 4 1.2-6.5L3 10l6-1 3-6z" />
+            </svg>
+          </button>
+          <button type="button" className="profile-tab" aria-label="Highlights">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 2v5M12 17v5M2 12h5M17 12h5M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3" />
+            </svg>
+          </button>
+          <button type="button" className="profile-tab" aria-label="Saved">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
+            </svg>
+          </button>
+        </nav>
 
-        <section className="user-posts" aria-label="Assigned posts">
-          <h2 className="user-posts-title">Assigned posts</h2>
-          <div className="placeholder">
-            <p>No posts assigned yet.</p>
+        <section className="profile-gallery" aria-label="User posts">
+          <div className="gallery-frame">
+            {galleryPosts.map((post) => (
+              <div key={post.id} className="gallery-card">
+                <img src={post.image} alt="User post" />
+              </div>
+            ))}
           </div>
         </section>
       </section>
@@ -1144,6 +1166,7 @@ function OnboardingPreferencesPage({ user, onUpdateUser, onDismissPrompt }) {
 
 function AccountSettings({ user, onUpdateUser }) {
   const navigate = useNavigate();
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [formData, setFormData] = useState({
     name: user?.name || "",
     username: user?.username || "",
@@ -1159,7 +1182,7 @@ function AccountSettings({ user, onUpdateUser }) {
     normalizeFavoriteBrands(user?.favoriteBrands)
   );
   const [customBrand, setCustomBrand] = useState("");
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(user?.avatarUrl || null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -1172,9 +1195,11 @@ function AccountSettings({ user, onUpdateUser }) {
       newPassword: "",
       confirmPassword: "",
     });
+    setAvatarUrl(user?.avatarUrl || "");
     setSizePreferences(normalizeSizePreferences(user?.sizePreferences));
     setFavoriteBrands(normalizeFavoriteBrands(user?.favoriteBrands));
     setCustomBrand("");
+    setPreviewUrl(user?.avatarUrl || null);
   }, [user]);
 
   function handleChange(event) {
@@ -1184,9 +1209,15 @@ function AccountSettings({ user, onUpdateUser }) {
 
   function handleFileChange(event) {
     const file = event.target.files[0];
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    }
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      setPreviewUrl(result || null);
+      setAvatarUrl(result || "");
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleSubmit(event) {
@@ -1211,6 +1242,7 @@ function AccountSettings({ user, onUpdateUser }) {
           name: formData.name,
           username: formData.username,
           bio: formData.bio,
+          avatarUrl,
           sizePreferences: toSizePreferencesApiPayload(sizePreferences),
           favoriteBrands: normalizeFavoriteBrands(favoriteBrands),
         }),

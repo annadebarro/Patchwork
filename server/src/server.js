@@ -42,7 +42,7 @@ const corsOptions = isProduction
     };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 if (DEBUG_REQUESTS) {
   app.use((req, res, next) => {
@@ -108,6 +108,10 @@ async function ensureUserPreferenceColumns(sequelize) {
   await sequelize.query(
     `ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "size_preferences" JSONB DEFAULT '${DEFAULT_SIZE_PREFERENCES_JSON}'::jsonb;`,
+    queryOptions
+  );
+  await sequelize.query(
+    'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" TEXT;',
     queryOptions
   );
   await sequelize.query(
