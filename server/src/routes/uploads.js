@@ -49,6 +49,10 @@ const upload = multer({
 });
 
 router.post("/", upload.single("file"), async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: "File uploads are not configured." });
+  }
+
   if (!req.file) {
     return res.status(400).json({ error: "Missing file upload." });
   }
