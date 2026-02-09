@@ -277,6 +277,56 @@ function initModels(sequelize) {
   User.hasMany(UserAction, { foreignKey: "userId", as: "actions" });
   UserAction.belongsTo(User, { foreignKey: "userId", as: "user" });
 
+  const Post = sequelize.define(
+    "Post",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      type: {
+        type: DataTypes.ENUM("regular", "market"),
+        allowNull: false,
+        defaultValue: "regular",
+      },
+      caption: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: "",
+      },
+      imageUrl: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        field: "image_url",
+      },
+      priceCents: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "price_cents",
+      },
+      isPublic: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+        field: "is_public",
+      },
+    },
+    {
+      tableName: "posts",
+      timestamps: true,
+      underscored: true,
+    }
+  );
+
+  User.hasMany(Post, { foreignKey: "userId", as: "posts" });
+  Post.belongsTo(User, { foreignKey: "userId", as: "author" });
+
   models = {
     User,
     Follow,
@@ -284,6 +334,7 @@ function initModels(sequelize) {
     ConversationParticipant,
     Message,
     UserAction,
+    Post,
   };
 
   return models;

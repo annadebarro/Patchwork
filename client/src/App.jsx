@@ -184,6 +184,11 @@ async function parseApiResponse(res) {
   }
 }
 
+function formatPrice(priceCents) {
+  if (!Number.isFinite(priceCents)) return "";
+  return `$${(priceCents / 100).toFixed(2)}`;
+}
+
 function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -195,6 +200,8 @@ function App() {
   const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptError, setPromptError] = useState("");
+  const [createPostOpen, setCreatePostOpen] = useState(false);
+  const [postRefreshKey, setPostRefreshKey] = useState(0);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -411,17 +418,23 @@ function App() {
         <Route
           element={
             <RequireAuth user={user}>
-              <AuthedLayout onLogout={handleLogout} />
+              <AuthedLayout
+                onLogout={handleLogout}
+                onOpenCreatePost={() => setCreatePostOpen(true)}
+              />
             </RequireAuth>
           }
         >
           <Route path="/home" element={<HomeLayout />}>
             <Route index element={<Navigate to="social" replace />} />
-            <Route path="social" element={<SocialHome />} />
-            <Route path="marketplace" element={<MarketplaceHome />} />
+            <Route path="social" element={<SocialHome refreshKey={postRefreshKey} />} />
+            <Route path="marketplace" element={<MarketplaceHome refreshKey={postRefreshKey} />} />
           </Route>
           <Route path="/userpage/:username" element={<UserPage />} />
-          <Route path="/profile" element={<UserPage user={user} isOwnProfile />} />
+          <Route
+            path="/profile"
+            element={<UserPage user={user} isOwnProfile refreshKey={postRefreshKey} />}
+          />
           <Route path="/settings" element={<AccountSettings user={user} onUpdateUser={setUser} />} />
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
@@ -435,6 +448,15 @@ function App() {
           error={promptError}
         />
       )}
+
+      <CreatePostModal
+        isOpen={createPostOpen}
+        onClose={() => setCreatePostOpen(false)}
+        onCreated={() => {
+          setPostRefreshKey((prev) => prev + 1);
+          setCreatePostOpen(false);
+        }}
+      />
     </main>
   );
 }
@@ -568,7 +590,7 @@ function PatchLogo({ className }) {
   );
 }
 
-function AuthedLayout({ onLogout }) {
+function AuthedLayout({ onLogout, onOpenCreatePost }) {
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
@@ -608,7 +630,12 @@ function AuthedLayout({ onLogout }) {
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </NavLink>
-          <button className="sidebar-icon" title="Create Post" type="button">
+          <button
+            className="sidebar-icon"
+            title="Create Post"
+            type="button"
+            onClick={onOpenCreatePost}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -660,44 +687,284 @@ function HomeLayout() {
   );
 }
 
-function SocialHome() {
+function SocialHome({ refreshKey }) {
+  return <PostsGrid type="regular" refreshKey={refreshKey} />;
+}
+
+function MarketplaceHome({ refreshKey }) {
+  return <PostsGrid type="market" refreshKey={refreshKey} />;
+}
+
+function PostsGrid({ type, refreshKey }) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchPosts() {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams();
+        if (type) params.set("type", type);
+        const res = await fetch(`${API_BASE_URL}/posts?${params.toString()}`);
+        const data = await parseApiResponse(res);
+        if (!res.ok) {
+          const message = data?.message || `Failed to load posts (${res.status})`;
+          if (isMounted) setError(message);
+        } else if (isMounted) {
+          setPosts(Array.isArray(data?.posts) ? data.posts : []);
+        }
+      } catch (err) {
+        if (isMounted) setError("Network error while loading posts.");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchPosts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [type, refreshKey]);
+
+  if (loading) {
+    return <div className="feed-empty">Loading posts...</div>;
+  }
+
+  if (error) {
+    return <div className="feed-empty">{error}</div>;
+  }
+
+  if (!posts.length) {
+    return <div className="feed-empty">No posts yet.</div>;
+  }
+
   return (
     <div className="masonry-grid">
-      {samplePosts.map((post) => (
-        <div key={post.id} className="post-card">
-          <img src={post.image} alt="Post" />
-          {post.forSale && (
-            <div className="sale-badge">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <path d="M16 10a4 4 0 0 1-8 0" />
-              </svg>
-            </div>
-          )}
-        </div>
+      {posts.map((post) => (
+        <PostCard key={post.id} post={post} />
       ))}
     </div>
   );
 }
 
-function MarketplaceHome() {
-  const marketplacePosts = samplePosts.filter((post) => post.forSale);
+function PostCard({ post }) {
+  const isMarket = post.type === "market";
+  const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
+  const caption = typeof post.caption === "string" ? post.caption : "";
 
   return (
-    <div className="masonry-grid">
-      {marketplacePosts.map((post) => (
-        <div key={post.id} className="post-card">
-          <img src={post.image} alt="Post" />
-          <div className="sale-badge">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <path d="M16 10a4 4 0 0 1-8 0" />
-            </svg>
-          </div>
+    <div className="post-card">
+      <img src={post.imageUrl} alt={caption || "Post"} />
+      {isMarket && (
+        <div className="sale-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <path d="M16 10a4 4 0 0 1-8 0" />
+          </svg>
         </div>
-      ))}
+      )}
+      {(caption || priceLabel) && (
+        <div className="post-meta">
+          {caption && <p className="post-caption">{caption}</p>}
+          {priceLabel && <p className="post-price">{priceLabel}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CreatePostModal({ isOpen, onClose, onCreated }) {
+  const [type, setType] = useState("regular");
+  const [caption, setCaption] = useState("");
+  const [price, setPrice] = useState("");
+  const [imageFile, setImageFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setType("regular");
+      setCaption("");
+      setPrice("");
+      setImageFile(null);
+      setPreviewUrl("");
+      setError("");
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function handleFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    if (file) {
+      setImageFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    } else {
+      setImageFile(null);
+      setPreviewUrl("");
+    }
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+
+    if (!imageFile) {
+      setError("Please select an image to upload.");
+      return;
+    }
+
+    if (type === "market") {
+      const numericPrice = Number(price);
+      if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+        setError("Please enter a valid dollar amount.");
+        return;
+      }
+    }
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("Please log in again.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", imageFile);
+      formData.append("folder", "posts");
+
+      const uploadRes = await fetch(`${API_BASE_URL}/uploads`, {
+        method: "POST",
+        body: formData,
+      });
+      const uploadData = await parseApiResponse(uploadRes);
+      if (!uploadRes.ok) {
+        const message = uploadData?.error || uploadData?.message || `Upload failed (${uploadRes.status})`;
+        setError(message);
+        return;
+      }
+
+      const imageUrl = uploadData?.publicUrl;
+      if (!imageUrl) {
+        setError("Upload succeeded but no public URL was returned.");
+        return;
+      }
+
+      const payload = {
+        type,
+        caption: caption.trim(),
+        imageUrl,
+      };
+
+      if (type === "market") {
+        payload.priceCents = Math.round(Number(price) * 100);
+      }
+
+      const res = await fetch(`${API_BASE_URL}/posts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await parseApiResponse(res);
+      if (!res.ok) {
+        const message = data?.message || `Create failed (${res.status})`;
+        setError(message);
+        return;
+      }
+
+      if (typeof onCreated === "function") {
+        onCreated(data?.post);
+      }
+    } catch (err) {
+      setError("Network error while creating the post.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="create-post-overlay" role="dialog" aria-modal="true">
+      <div className="create-post-modal">
+        <div className="create-post-header">
+          <h2>Create a post</h2>
+          <button type="button" className="create-post-close" onClick={onClose} disabled={submitting}>
+            Close
+          </button>
+        </div>
+
+        {error && <div className="error">{error}</div>}
+
+        <form className="create-post-form" onSubmit={handleSubmit}>
+          <label>
+            Post type
+            <select value={type} onChange={(event) => setType(event.target.value)}>
+              <option value="regular">Regular</option>
+              <option value="market">Marketplace</option>
+            </select>
+          </label>
+
+          <label>
+            Caption
+            <textarea
+              value={caption}
+              onChange={(event) => setCaption(event.target.value)}
+              placeholder="Write something about your post"
+              rows={3}
+            />
+          </label>
+
+          {type === "market" && (
+            <label>
+              Price (USD)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                value={price}
+                onChange={(event) => setPrice(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          )}
+
+          <label>
+            Image
+            <input type="file" accept="image/*" onChange={handleFileChange} />
+          </label>
+
+          {previewUrl && (
+            <div className="create-post-preview">
+              <img src={previewUrl} alt="Preview" />
+            </div>
+          )}
+
+          <button type="submit" className="save-button" disabled={submitting}>
+            {submitting ? "Uploading..." : "Share post"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -713,12 +980,48 @@ function ProfilePatch({ name }) {
   );
 }
 
-function UserPage({ user, isOwnProfile = false }) {
+function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
   const { username } = useParams();
   const navigate = useNavigate();
   const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
   const displayUsername = isOwnProfile ? user?.username || "your-username" : username || "username";
   const displayBio = isOwnProfile ? user?.bio || "" : "";
+  const [posts, setPosts] = useState([]);
+  const [postsLoading, setPostsLoading] = useState(isOwnProfile);
+  const [postsError, setPostsError] = useState("");
+
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    let isMounted = true;
+
+    async function fetchPosts() {
+      setPostsLoading(true);
+      setPostsError("");
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_BASE_URL}/posts/mine`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await parseApiResponse(res);
+        if (!res.ok) {
+          const message = data?.message || `Failed to load posts (${res.status})`;
+          if (isMounted) setPostsError(message);
+        } else if (isMounted) {
+          setPosts(Array.isArray(data?.posts) ? data.posts : []);
+        }
+      } catch (err) {
+        if (isMounted) setPostsError("Network error while loading posts.");
+      } finally {
+        if (isMounted) setPostsLoading(false);
+      }
+    }
+
+    fetchPosts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOwnProfile, refreshKey]);
 
   return (
     <div className="feed-content">
@@ -760,10 +1063,26 @@ function UserPage({ user, isOwnProfile = false }) {
         </div>
 
         <section className="user-posts" aria-label="Assigned posts">
-          <h2 className="user-posts-title">Assigned posts</h2>
-          <div className="placeholder">
-            <p>No posts assigned yet.</p>
-          </div>
+          <h2 className="user-posts-title">Your posts</h2>
+          {postsLoading ? (
+            <div className="placeholder">
+              <p>Loading posts...</p>
+            </div>
+          ) : postsError ? (
+            <div className="placeholder">
+              <p>{postsError}</p>
+            </div>
+          ) : posts.length ? (
+            <div className="masonry-grid">
+              {posts.map((post) => (
+                <PostCard key={post.id} post={post} />
+              ))}
+            </div>
+          ) : (
+            <div className="placeholder">
+              <p>No posts yet.</p>
+            </div>
+          )}
         </section>
       </section>
     </div>
