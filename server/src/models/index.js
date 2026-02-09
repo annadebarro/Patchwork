@@ -66,6 +66,11 @@ function initModels(sequelize) {
         defaultValue: false,
         field: "onboarding_prompt_seen",
       },
+      profilePicture: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "profile_picture",
+      },
       passwordHash: {
         type: DataTypes.STRING,
         allowNull: false,

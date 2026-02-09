@@ -1512,7 +1512,8 @@ button:disabled {
   font-size: 2.2rem;
 }
 
-.profile-preview-img {
+.profile-preview-img,
+.profile-patch-img {
   width: 100%;
   height: 100%;
   object-fit: cover;

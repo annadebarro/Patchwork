@@ -106,6 +106,7 @@ function serializeUser(user) {
     bio: typeof user.bio === "string" ? user.bio : "",
     sizePreferences: normalizeStoredSizePreferences(user.sizePreferences),
     favoriteBrands,
+    profilePicture: user.profilePicture || null,
     onboardingStatus,
     onboardingPromptSeen,
     shouldShowOnboardingPrompt: onboardingStatus === "pending" && !onboardingPromptSeen,
@@ -391,6 +392,7 @@ router.get("/me", authMiddleware, async (req, res) => {
         "bio",
         "sizePreferences",
         "favoriteBrands",
+        "profilePicture",
         "onboardingStatus",
         "onboardingPromptSeen",
       ],
@@ -404,7 +406,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 });
 
 router.patch("/me", authMiddleware, async (req, res) => {
-  const { name, username, bio, sizePreferences, favoriteBrands } = req.body || {};
+  const { name, username, bio, sizePreferences, favoriteBrands, profilePicture } = req.body || {};
 
   try {
     const { User } = getModels();
@@ -448,6 +450,9 @@ router.patch("/me", authMiddleware, async (req, res) => {
     }
     if (validatedFavoriteBrands.value !== undefined) {
       user.favoriteBrands = validatedFavoriteBrands.value;
+    }
+    if (typeof profilePicture === "string") {
+      user.profilePicture = profilePicture;
     }
 
     await user.save();

@@ -967,12 +967,16 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   );
 }
 
-function ProfilePatch({ name }) {
+function ProfilePatch({ name, imageUrl }) {
   const initial = name?.charAt(0).toUpperCase() || "?";
   return (
     <div className="profile-patch">
       <div className="profile-patch-inner">
-        <span className="profile-patch-initial">{initial}</span>
+        {imageUrl ? (
+          <img src={imageUrl} alt={name || "Profile"} className="profile-patch-img" />
+        ) : (
+          <span className="profile-patch-initial">{initial}</span>
+        )}
       </div>
     </div>
   );
@@ -1025,7 +1029,7 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
     <div className="feed-content">
       <section className="user-page">
         <header className="user-header">
-          <ProfilePatch name={displayName} />
+          <ProfilePatch name={displayName} imageUrl={isOwnProfile ? user?.profilePicture : null} />
           <div className="user-header-info">
             <h1 className="user-name">{displayName}</h1>
             <p className="user-handle">@{displayUsername}</p>
@@ -1478,7 +1482,8 @@ function AccountSettings({ user, onUpdateUser }) {
     normalizeFavoriteBrands(user?.favoriteBrands)
   );
   const [customBrand, setCustomBrand] = useState("");
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(user?.profilePicture || null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -1494,6 +1499,8 @@ function AccountSettings({ user, onUpdateUser }) {
     setSizePreferences(normalizeSizePreferences(user?.sizePreferences));
     setFavoriteBrands(normalizeFavoriteBrands(user?.favoriteBrands));
     setCustomBrand("");
+    setAvatarFile(null);
+    setPreviewUrl(user?.profilePicture || null);
   }, [user]);
 
   function handleChange(event) {
@@ -1504,6 +1511,7 @@ function AccountSettings({ user, onUpdateUser }) {
   function handleFileChange(event) {
     const file = event.target.files[0];
     if (file) {
+      setAvatarFile(file);
       setPreviewUrl(URL.createObjectURL(file));
     }
   }
@@ -1520,19 +1528,49 @@ function AccountSettings({ user, onUpdateUser }) {
     setSaving(true);
     try {
       const token = localStorage.getItem("token");
+
+      let profilePictureUrl;
+      if (avatarFile) {
+        const uploadForm = new FormData();
+        uploadForm.append("file", avatarFile);
+        uploadForm.append("folder", "avatars");
+
+        const uploadRes = await fetch(`${API_BASE_URL}/uploads`, {
+          method: "POST",
+          body: uploadForm,
+        });
+        const uploadData = await parseApiResponse(uploadRes);
+        if (!uploadRes.ok) {
+          setMessage(uploadData?.error || uploadData?.message || "Image upload failed.");
+          setSaving(false);
+          return;
+        }
+        profilePictureUrl = uploadData?.publicUrl;
+        if (!profilePictureUrl) {
+          setMessage("Upload succeeded but no public URL was returned.");
+          setSaving(false);
+          return;
+        }
+      }
+
+      const patchBody = {
+        name: formData.name,
+        username: formData.username,
+        bio: formData.bio,
+        sizePreferences: toSizePreferencesApiPayload(sizePreferences),
+        favoriteBrands: normalizeFavoriteBrands(favoriteBrands),
+      };
+      if (profilePictureUrl) {
+        patchBody.profilePicture = profilePictureUrl;
+      }
+
       const res = await fetch(`${API_BASE_URL}/auth/me`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          name: formData.name,
-          username: formData.username,
-          bio: formData.bio,
-          sizePreferences: toSizePreferencesApiPayload(sizePreferences),
-          favoriteBrands: normalizeFavoriteBrands(favoriteBrands),
-        }),
+        body: JSON.stringify(patchBody),
       });
 
       const data = await parseApiResponse(res);
@@ -1540,6 +1578,8 @@ function AccountSettings({ user, onUpdateUser }) {
         setMessage(data?.message || "Failed to save changes");
       } else {
         onUpdateUser(data.user);
+        setAvatarFile(null);
+        setPreviewUrl(data.user.profilePicture || null);
         setMessage("Changes saved successfully!");
       }
     } catch (err) {

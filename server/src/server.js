@@ -123,6 +123,10 @@ async function ensureUserPreferenceColumns(sequelize) {
     'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "onboarding_prompt_seen" BOOLEAN DEFAULT false;',
     queryOptions
   );
+  await sequelize.query(
+    'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "profile_picture" TEXT;',
+    queryOptions
+  );
 
   // Backfill legacy rows before enforcing NOT NULL.
   await sequelize.query(
