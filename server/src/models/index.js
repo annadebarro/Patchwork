@@ -42,6 +42,11 @@ function initModels(sequelize) {
         allowNull: true,
         defaultValue: "",
       },
+      avatarUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "avatar_url",
+      },
       sizePreferences: {
         type: DataTypes.JSONB,
         allowNull: false,

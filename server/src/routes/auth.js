@@ -393,6 +393,7 @@ router.get("/me", authMiddleware, async (req, res) => {
         "name",
         "role",
         "bio",
+        "avatarUrl",
         "sizePreferences",
         "favoriteBrands",
         "profilePicture",
@@ -409,7 +410,15 @@ router.get("/me", authMiddleware, async (req, res) => {
 });
 
 router.patch("/me", authMiddleware, async (req, res) => {
-  const { name, username, bio, sizePreferences, favoriteBrands, profilePicture } = req.body || {};
+  const {
+    name,
+    username,
+    bio,
+    avatarUrl,
+    sizePreferences,
+    favoriteBrands,
+    profilePicture,
+  } = req.body || {};
 
   if (Object.prototype.hasOwnProperty.call(req.body || {}, "role")) {
     return res.status(400).json({ message: "Role cannot be changed through this endpoint." });
@@ -428,6 +437,11 @@ router.patch("/me", authMiddleware, async (req, res) => {
 
     const validatedBio = validateBio(bio);
     if (validatedBio.error) return res.status(400).json({ message: validatedBio.error });
+
+    const validatedAvatarUrl = validateAvatarUrl(avatarUrl);
+    if (validatedAvatarUrl.error) {
+      return res.status(400).json({ message: validatedAvatarUrl.error });
+    }
 
     const validatedSizePreferences = validateSizePreferences(sizePreferences);
     if (validatedSizePreferences.error) {
@@ -452,6 +466,7 @@ router.patch("/me", authMiddleware, async (req, res) => {
 
     if (validatedName.value !== undefined) user.name = validatedName.value;
     if (validatedBio.value !== undefined) user.bio = validatedBio.value;
+    if (validatedAvatarUrl.value !== undefined) user.avatarUrl = validatedAvatarUrl.value;
     if (validatedSizePreferences.value !== undefined) {
       user.sizePreferences = validatedSizePreferences.value;
     }
