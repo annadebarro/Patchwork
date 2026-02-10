@@ -386,6 +386,11 @@ function initModels(sequelize) {
         type: DataTypes.TEXT,
         allowNull: false,
       },
+      parentId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "parent_id",
+      },
     },
     {
       tableName: "comments",
@@ -485,7 +490,7 @@ function initModels(sequelize) {
         field: "actor_id",
       },
       type: {
-        type: DataTypes.ENUM("like", "comment", "follow", "patch"),
+        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention"),
         allowNull: false,
       },
       postId: {
@@ -524,6 +529,8 @@ function initModels(sequelize) {
   Comment.belongsTo(User, { foreignKey: "userId", as: "author" });
   Post.hasMany(Comment, { foreignKey: "postId", as: "comments" });
   Comment.belongsTo(Post, { foreignKey: "postId", as: "post" });
+  Comment.hasMany(Comment, { foreignKey: "parentId", as: "replies", onDelete: "CASCADE", hooks: true });
+  Comment.belongsTo(Comment, { foreignKey: "parentId", as: "parent" });
 
   User.hasMany(Quilt, { foreignKey: "userId", as: "quilts" });
   Quilt.belongsTo(User, { foreignKey: "userId", as: "owner" });
