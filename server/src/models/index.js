@@ -321,6 +321,12 @@ function initModels(sequelize) {
         defaultValue: true,
         field: "is_public",
       },
+      isSold: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_sold",
+      },
     },
     {
       tableName: "posts",
@@ -426,6 +432,12 @@ function initModels(sequelize) {
         allowNull: true,
         defaultValue: "",
       },
+      isPublic: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_public",
+      },
     },
     {
       tableName: "quilts",
@@ -471,6 +483,38 @@ function initModels(sequelize) {
     }
   );
 
+  const CommentLike = sequelize.define(
+    "CommentLike",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      commentId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "comment_id",
+      },
+    },
+    {
+      tableName: "comment_likes",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["user_id", "comment_id"],
+        },
+      ],
+    }
+  );
+
   const Notification = sequelize.define(
     "Notification",
     {
@@ -490,7 +534,7 @@ function initModels(sequelize) {
         field: "actor_id",
       },
       type: {
-        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention"),
+        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention", "comment_like", "message"),
         allowNull: false,
       },
       postId: {
@@ -532,6 +576,11 @@ function initModels(sequelize) {
   Comment.hasMany(Comment, { foreignKey: "parentId", as: "replies", onDelete: "CASCADE", hooks: true });
   Comment.belongsTo(Comment, { foreignKey: "parentId", as: "parent" });
 
+  User.hasMany(CommentLike, { foreignKey: "userId", as: "commentLikes" });
+  CommentLike.belongsTo(User, { foreignKey: "userId", as: "user" });
+  Comment.hasMany(CommentLike, { foreignKey: "commentId", as: "commentLikes" });
+  CommentLike.belongsTo(Comment, { foreignKey: "commentId", as: "comment" });
+
   User.hasMany(Quilt, { foreignKey: "userId", as: "quilts" });
   Quilt.belongsTo(User, { foreignKey: "userId", as: "owner" });
 
@@ -552,6 +601,7 @@ function initModels(sequelize) {
     Post,
     Like,
     Comment,
+    CommentLike,
     Quilt,
     Patch,
     Notification,

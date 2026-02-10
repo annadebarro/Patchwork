@@ -187,4 +187,109 @@ router.get("/:postId", optionalAuthMiddleware, async (req, res) => {
   }
 });
 
+router.patch("/:postId", authMiddleware, async (req, res) => {
+  const { Post } = getModels();
+  const { postId } = req.params;
+  const { caption, priceCents } = req.body || {};
+
+  try {
+    const post = await Post.findByPk(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found." });
+    }
+
+    if (post.userId !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    if (caption !== undefined) {
+      if (typeof caption !== "string") {
+        return res.status(400).json({ message: "Caption must be a string." });
+      }
+      const cleaned = caption.trim();
+      if (cleaned.length > MAX_CAPTION_LENGTH) {
+        return res.status(400).json({
+          message: `Caption cannot exceed ${MAX_CAPTION_LENGTH} characters.`,
+        });
+      }
+      post.caption = cleaned;
+    }
+
+    if (priceCents !== undefined) {
+      const normalizedPrice = parsePriceCents(priceCents);
+      if (normalizedPrice === null && priceCents !== null) {
+        return res.status(400).json({ message: "priceCents must be a valid non-negative number." });
+      }
+      post.priceCents = normalizedPrice;
+    }
+
+    await post.save();
+    return res.json({ post });
+  } catch (err) {
+    console.error("Post update failed:", err);
+    return res.status(500).json({ message: "Failed to update post." });
+  }
+});
+
+router.delete("/:postId", authMiddleware, async (req, res) => {
+  const { Post, Like, Comment, Patch, Notification, CommentLike } = getModels();
+  const { postId } = req.params;
+
+  try {
+    const post = await Post.findByPk(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found." });
+    }
+
+    if (post.userId !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    // Cascade deletes
+    const comments = await Comment.findAll({ where: { postId }, attributes: ["id"] });
+    const commentIds = comments.map((c) => c.id);
+    if (commentIds.length) {
+      await CommentLike.destroy({ where: { commentId: commentIds } });
+    }
+    await Comment.destroy({ where: { postId } });
+    await Like.destroy({ where: { postId } });
+    await Patch.destroy({ where: { postId } });
+    await Notification.destroy({ where: { postId } });
+    await post.destroy();
+
+    return res.json({ message: "Post deleted." });
+  } catch (err) {
+    console.error("Post delete failed:", err);
+    return res.status(500).json({ message: "Failed to delete post." });
+  }
+});
+
+router.patch("/:postId/sold", authMiddleware, async (req, res) => {
+  const { Post } = getModels();
+  const { postId } = req.params;
+
+  try {
+    const post = await Post.findByPk(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found." });
+    }
+
+    if (post.userId !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    if (post.type !== "market") {
+      return res.status(400).json({ message: "Only market posts can be marked as sold." });
+    }
+
+    post.isSold = !post.isSold;
+    await post.save();
+
+    return res.json({ post });
+  } catch (err) {
+    console.error("Post sold toggle failed:", err);
+    return res.status(500).json({ message: "Failed to update sold status." });
+  }
+});
+
 module.exports = router;

@@ -293,7 +293,7 @@ function App() {
         setUser(data.user);
         setShowOnboardingPrompt(Boolean(data.user?.shouldShowOnboardingPrompt));
         setPromptError("");
-        navigate("/home/social", { replace: true });
+        navigate("/home", { replace: true });
       }
     } catch (err) {
       console.error("Login network error", err);
@@ -385,7 +385,7 @@ function App() {
           path="/"
           element={
             user ? (
-              <Navigate to="/home/social" replace />
+              <Navigate to="/home" replace />
             ) : (
               <AuthPage
                 authView={authView}
@@ -421,12 +421,9 @@ function App() {
             </RequireAuth>
           }
         >
-          <Route path="/home" element={<HomeLayout />}>
-            <Route index element={<Navigate to="social" replace />} />
-            <Route path="social" element={<SocialHome refreshKey={postRefreshKey} />} />
-            <Route path="marketplace" element={<MarketplaceHome refreshKey={postRefreshKey} />} />
-          </Route>
-          <Route path="/post/:postId" element={<PostDetailPage />} />
+          <Route path="/home" element={<HomeLayout refreshKey={postRefreshKey} />} />
+          <Route path="/post/:postId" element={<PostDetailPage currentUser={user} />} />
+          <Route path="/messages" element={<MessagesPage currentUser={user} />} />
           <Route path="/userpage/:username" element={<UserPage currentUser={user} />} />
           <Route
             path="/profile"
@@ -434,7 +431,7 @@ function App() {
           />
           <Route path="/settings" element={<AccountSettings user={user} onUpdateUser={setUser} />} />
         </Route>
-        <Route path="*" element={<Navigate to={user ? "/home/social" : "/"} replace />} />
+        <Route path="*" element={<Navigate to={user ? "/home" : "/"} replace />} />
       </Routes>
 
       {shouldRenderPrompt && (
@@ -652,6 +649,10 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
         return `@${actor} saved your post to a quilt`;
       case "mention":
         return `@${actor} mentioned you in a comment`;
+      case "comment_like":
+        return `@${actor} liked your comment`;
+      case "message":
+        return `@${actor} sent you a message`;
       default:
         return `@${actor} interacted with you`;
     }
@@ -677,7 +678,7 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
         </div>
         <nav className="sidebar-nav">
           <NavLink
-            to="/home/social"
+            to="/home"
             className={({ isActive }) => `sidebar-icon ${isActive ? "active" : ""}`}
             title="Home"
           >
@@ -696,7 +697,7 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
               <circle cx="12" cy="7" r="4" />
             </svg>
           </NavLink>
-          <NavLink to="/home/messages" className="sidebar-icon sidebar-icon--messages" title="Messages">
+          <NavLink to="/messages" className={({ isActive }) => `sidebar-icon sidebar-icon--messages ${isActive ? "active" : ""}`} title="Messages">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
@@ -807,33 +808,46 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
   );
 }
 
-function HomeLayout() {
+function HomeLayout({ refreshKey }) {
+  const [filters, setFilters] = useState({ social: true, marketplace: true });
+
+  function toggleFilter(key) {
+    setFilters((prev) => {
+      const other = key === "social" ? "marketplace" : "social";
+      if (prev[key] && !prev[other]) return prev;
+      return { ...prev, [key]: !prev[key] };
+    });
+  }
+
+  const type = filters.social && filters.marketplace
+    ? null
+    : filters.social
+      ? "regular"
+      : "market";
+
   return (
     <>
-      {/* Feed Tabs */}
       <nav className="feed-tabs">
-        <NavLink to="/home/social" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
+        <button
+          type="button"
+          className={`feed-tab ${filters.social ? "active" : ""}`}
+          onClick={() => toggleFilter("social")}
+        >
           Social
-        </NavLink>
-        <NavLink to="/home/marketplace" className={({ isActive }) => `feed-tab ${isActive ? "active" : ""}`}>
+        </button>
+        <button
+          type="button"
+          className={`feed-tab ${filters.marketplace ? "active" : ""}`}
+          onClick={() => toggleFilter("marketplace")}
+        >
           Marketplace
-        </NavLink>
+        </button>
       </nav>
-
-      {/* Feed Content */}
       <div className="feed-content">
-        <Outlet />
+        <PostsGrid type={type} refreshKey={refreshKey} />
       </div>
     </>
   );
-}
-
-function SocialHome({ refreshKey }) {
-  return <PostsGrid type="regular" refreshKey={refreshKey} />;
-}
-
-function MarketplaceHome({ refreshKey }) {
-  return <PostsGrid type="market" refreshKey={refreshKey} />;
 }
 
 function PostsGrid({ type, refreshKey }) {
@@ -893,16 +907,33 @@ function PostsGrid({ type, refreshKey }) {
   );
 }
 
-function PostCard({ post }) {
+function PostCard({ post, imageOnly }) {
   const navigate = useNavigate();
   const isMarket = post.type === "market";
   const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
   const caption = typeof post.caption === "string" ? post.caption : "";
   const authorUsername = post.author?.username;
+  const isSold = Boolean(post.isSold);
+
+  if (imageOnly) {
+    return (
+      <div
+        className="post-card post-card--image-only"
+        onClick={() => navigate(`/post/${post.id}`)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") navigate(`/post/${post.id}`);
+        }}
+      >
+        <img src={post.imageUrl} alt="Post" />
+      </div>
+    );
+  }
 
   return (
     <div
-      className="post-card post-card--clickable"
+      className={`post-card post-card--clickable${isSold ? " post-card--sold" : ""}`}
       onClick={() => navigate(`/post/${post.id}`)}
       role="button"
       tabIndex={0}
@@ -911,7 +942,8 @@ function PostCard({ post }) {
       }}
     >
       <img src={post.imageUrl} alt={caption || "Post"} />
-      {isMarket && (
+      {isSold && <div className="sold-badge">SOLD</div>}
+      {isMarket && !isSold && (
         <div className="sale-badge">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
@@ -1148,6 +1180,9 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [followListType, setFollowListType] = useState(null);
+  const [activeTab, setActiveTab] = useState("everything");
+  const [quilts, setQuilts] = useState([]);
+  const [selectedQuiltId, setSelectedQuiltId] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -1182,6 +1217,7 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
             if (profileRes.ok && isMounted) {
               setFollowerCount(profileData.user?.followerCount || 0);
               setFollowingCount(profileData.user?.followingCount || 0);
+              setQuilts(Array.isArray(profileData?.quilts) ? profileData.quilts : []);
             }
           }
         } else if (username) {
@@ -1199,6 +1235,7 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
             setFollowerCount(data.user?.followerCount || 0);
             setFollowingCount(data.user?.followingCount || 0);
             setIsFollowing(Boolean(data.isFollowing));
+            setQuilts(Array.isArray(data?.quilts) ? data.quilts : []);
           }
         }
       } catch (err) {
@@ -1269,7 +1306,7 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
               type="button"
               onClick={() => navigate("/settings")}
             >
-              Change account info
+              Edit profile
             </button>
           )}
           {showFollowButton && (
@@ -1303,8 +1340,49 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
           )}
         </div>
 
+        <nav className="profile-tabs">
+          {[
+            { key: "everything", title: "Everything", icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
+            )},
+            { key: "marketplace", title: "Marketplace", icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <path d="M16 10a4 4 0 0 1-8 0" />
+              </svg>
+            )},
+            { key: "quilts", title: "Quilts", icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="4" y="4" width="16" height="16" rx="1" />
+                <path d="M4 8h-1.5M4 12h-1.5M4 16h-1.5M20 8h1.5M20 12h1.5M20 16h1.5M8 4v-1.5M12 4v-1.5M16 4v-1.5M8 20v1.5M12 20v1.5M16 20v1.5" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            )},
+            { key: "ratings", title: "Ratings", icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            )},
+          ].map((tab, i) => (
+            <button
+              key={tab.key}
+              type="button"
+              title={tab.title}
+              className={`profile-tab${activeTab === tab.key ? " active" : ""}`}
+              style={{ transform: `rotate(${i % 2 === 0 ? -1 : 1.5}deg)` }}
+              onClick={() => { setActiveTab(tab.key); setSelectedQuiltId(null); }}
+            >
+              {tab.icon}
+            </button>
+          ))}
+        </nav>
+
         <section className="user-posts" aria-label="User posts">
-          <h2 className="user-posts-title">{isOwnProfile ? "Your posts" : "Posts"}</h2>
           {postsLoading ? (
             <div className="placeholder">
               <p>Loading posts...</p>
@@ -1313,17 +1391,42 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
             <div className="placeholder">
               <p>{postsError}</p>
             </div>
-          ) : posts.length ? (
-            <div className="masonry-grid">
-              {posts.map((post) => (
-                <PostCard key={post.id} post={post} />
-              ))}
-            </div>
-          ) : (
-            <div className="placeholder">
-              <p>No posts yet.</p>
-            </div>
-          )}
+          ) : activeTab === "everything" ? (
+            posts.length ? (
+              <div className="masonry-grid">
+                {posts.map((post) => (
+                  <PostCard key={post.id} post={post} imageOnly />
+                ))}
+              </div>
+            ) : (
+              <div className="placeholder"><p>No posts yet.</p></div>
+            )
+          ) : activeTab === "marketplace" ? (
+            (() => {
+              const marketPosts = posts.filter((p) => p.type === "market");
+              return marketPosts.length ? (
+                <div className="masonry-grid">
+                  {marketPosts.map((post) => (
+                    <PostCard key={post.id} post={post} />
+                  ))}
+                </div>
+              ) : (
+                <div className="placeholder"><p>No marketplace posts yet.</p></div>
+              );
+            })()
+          ) : activeTab === "quilts" ? (
+            selectedQuiltId ? (
+              <QuiltDetailView
+                quiltId={selectedQuiltId}
+                isOwner={isOwnProfile}
+                onBack={() => setSelectedQuiltId(null)}
+              />
+            ) : (
+              <QuiltListView quilts={quilts} onSelectQuilt={setSelectedQuiltId} isOwnProfile={isOwnProfile} />
+            )
+          ) : activeTab === "ratings" ? (
+            <div className="placeholder"><p>Ratings coming soon...</p></div>
+          ) : null}
         </section>
       </section>
 
@@ -1342,6 +1445,377 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function GrannySquareGrid({ images, mini, isOwner, onRemove, removingId, onClickPatch }) {
+  const navigate = useNavigate();
+  const items = mini
+    ? (images || []).slice(0, 9).map((url, i) => ({ postId: i, imageUrl: url }))
+    : images || [];
+
+  if (!items.length) {
+    return <div className="placeholder"><p>No patches yet.</p></div>;
+  }
+
+  const cols = mini ? Math.min(items.length, 3) : undefined;
+
+  return (
+    <div
+      className={`granny-grid ${mini ? "granny-grid--mini" : "granny-grid--full"}`}
+      style={mini ? { "--granny-cols": cols } : undefined}
+    >
+      <div className="granny-grid-inner">
+        {items.map((item) => (
+          <div
+            key={mini ? item.postId : item.postId}
+            className="granny-square"
+          >
+            <div
+              className="granny-square-inner"
+              onClick={() => {
+                if (mini) return;
+                if (onClickPatch) onClickPatch(item.postId);
+                else navigate(`/post/${item.postId}`);
+              }}
+              style={mini ? undefined : { cursor: "pointer" }}
+            >
+              <img src={item.imageUrl} alt="" />
+              {!mini && isOwner && (
+                <button
+                  type="button"
+                  className="granny-square-remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onRemove) onRemove(item.postId);
+                  }}
+                  disabled={removingId === item.postId}
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuiltListView({ quilts, onSelectQuilt, isOwnProfile }) {
+  const displayQuilts = isOwnProfile ? quilts : quilts.filter((q) => q.isPublic);
+
+  if (!displayQuilts.length) {
+    return <div className="placeholder"><p>No quilts yet.</p></div>;
+  }
+
+  return (
+    <div className="quilt-list">
+      {displayQuilts.map((quilt) => (
+        <button
+          key={quilt.id}
+          type="button"
+          className="quilt-list-card"
+          onClick={() => onSelectQuilt(quilt.id)}
+        >
+          <div className="quilt-list-preview">
+            <GrannySquareGrid images={quilt.previewImages} mini />
+          </div>
+          <div className="quilt-list-info">
+            <h3 className="quilt-list-name">
+              {quilt.isPublic ? (
+                <svg className="quilt-privacy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              ) : (
+                <svg className="quilt-privacy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              )}
+              {quilt.name}
+            </h3>
+            <span className="quilt-list-count">
+              {quilt.patchCount} {quilt.patchCount === 1 ? "patch" : "patches"}
+            </span>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function QuiltDetailView({ quiltId, isOwner, onBack }) {
+  const navigate = useNavigate();
+  const [quilt, setQuilt] = useState(null);
+  const [patches, setPatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [removingId, setRemovingId] = useState(null);
+  const [editingName, setEditingName] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchQuilt() {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}`, { headers });
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setQuilt(data.quilt);
+          setPatches(
+            (data.quilt?.patches || []).map((p) => ({
+              postId: p.post?.id || p.postId,
+              imageUrl: p.post?.imageUrl,
+            })).filter((p) => p.imageUrl)
+          );
+        }
+      } catch {
+        // silent
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    fetchQuilt();
+    return () => { isMounted = false; };
+  }, [quiltId]);
+
+  async function removePatch(postId) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setRemovingId(postId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}/patches/${postId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setPatches((prev) => prev.filter((p) => p.postId !== postId));
+      }
+    } catch {
+      // silent
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  async function saveEdit(fields) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(fields),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setQuilt(data.quilt);
+        setEditingName(false);
+        setEditingDesc(false);
+      }
+    } catch {
+      // silent
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function togglePrivacy() {
+    if (!quilt) return;
+    await saveEdit({ isPublic: !quilt.isPublic });
+  }
+
+  async function deleteQuilt() {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        onBack();
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  if (loading) {
+    return <div className="placeholder"><p>Loading quilt...</p></div>;
+  }
+
+  return (
+    <div className="quilt-detail">
+      <button type="button" className="back-button" onClick={onBack}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
+        All quilts
+      </button>
+      {quilt && (
+        <>
+          <div className="quilt-detail-header">
+            {editingName ? (
+              <div className="quilt-edit-inline">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  maxLength={100}
+                  className="quilt-edit-input"
+                />
+                <button
+                  type="button"
+                  className="save-button save-button--sm"
+                  onClick={() => saveEdit({ name: editName })}
+                  disabled={editSaving || !editName.trim()}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="cancel-button cancel-button--sm"
+                  onClick={() => setEditingName(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <h2 className="quilt-detail-name">
+                {quilt.name}
+                {isOwner && (
+                  <button
+                    type="button"
+                    className="quilt-edit-btn"
+                    onClick={() => { setEditName(quilt.name); setEditingName(true); }}
+                    title="Edit name"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                )}
+              </h2>
+            )}
+
+            {isOwner && (
+              <div className="quilt-detail-controls">
+                <button
+                  type="button"
+                  className={`quilt-privacy-toggle ${quilt.isPublic ? "quilt-privacy-toggle--public" : ""}`}
+                  onClick={togglePrivacy}
+                  disabled={editSaving}
+                >
+                  {quilt.isPublic ? (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                      </svg>
+                      Public
+                    </>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      Private
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {editingDesc ? (
+            <div className="quilt-edit-inline">
+              <textarea
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                className="quilt-edit-input"
+                rows={2}
+              />
+              <button
+                type="button"
+                className="save-button save-button--sm"
+                onClick={() => saveEdit({ description: editDesc })}
+                disabled={editSaving}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="cancel-button cancel-button--sm"
+                onClick={() => setEditingDesc(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            quilt.description ? (
+              <p className="quilt-detail-desc" onClick={() => { if (isOwner) { setEditDesc(quilt.description); setEditingDesc(true); } }}>
+                {quilt.description}
+                {isOwner && <span className="quilt-edit-hint"> (click to edit)</span>}
+              </p>
+            ) : isOwner ? (
+              <p className="quilt-detail-desc quilt-detail-desc--empty" onClick={() => { setEditDesc(""); setEditingDesc(true); }}>
+                Add a description...
+              </p>
+            ) : null
+          )}
+
+          {isOwner && (
+            <div className="quilt-danger-zone">
+              {deleteConfirm ? (
+                <div className="quilt-delete-confirm">
+                  <span>Delete this quilt?</span>
+                  <button type="button" className="cancel-button cancel-button--sm" onClick={deleteQuilt}>
+                    Yes, delete
+                  </button>
+                  <button type="button" className="save-button save-button--sm" onClick={() => setDeleteConfirm(false)}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="quilt-delete-btn"
+                  onClick={() => setDeleteConfirm(true)}
+                >
+                  Delete quilt
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      <GrannySquareGrid
+        images={patches}
+        isOwner={isOwner}
+        onRemove={removePatch}
+        removingId={removingId}
+        onClickPatch={(postId) => navigate(`/post/${postId}`)}
+      />
     </div>
   );
 }
@@ -1743,7 +2217,7 @@ function OnboardingPreferencesPage({ user, onUpdateUser, onDismissPrompt }) {
       } else {
         onUpdateUser(data.user);
         onDismissPrompt();
-        navigate("/home/social", { replace: true });
+        navigate("/home", { replace: true });
       }
     } catch (err) {
       console.error("Onboarding submit failed", err);
@@ -2112,12 +2586,18 @@ function AccountSettings({ user, onUpdateUser }) {
   );
 }
 
-function PostDetailPage() {
+function PostDetailPage({ currentUser }) {
   const { postId } = useParams();
   const navigate = useNavigate();
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editCaption, setEditCaption] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [soldBusy, setSoldBusy] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -2151,6 +2631,73 @@ function PostDetailPage() {
   const handleLikeChange = useCallback((liked, likeCount) => {
     setPost((prev) => prev ? { ...prev, userLiked: liked, likeCount } : prev);
   }, []);
+
+  const isOwner = currentUser && post && currentUser.id === post.userId;
+
+  async function saveEdit() {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setEditSaving(true);
+    try {
+      const payload = { caption: editCaption };
+      if (post.type === "market" && editPrice !== "") {
+        payload.priceCents = Math.round(Number(editPrice) * 100);
+      }
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setPost((prev) => ({ ...prev, ...data.post }));
+        setEditing(false);
+      }
+    } catch {
+      // silent
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function deletePost() {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        navigate(-1);
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  async function toggleSold() {
+    const token = localStorage.getItem("token");
+    if (!token || soldBusy) return;
+    setSoldBusy(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}/sold`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setPost((prev) => ({ ...prev, isSold: data.post.isSold }));
+      }
+    } catch {
+      // silent
+    } finally {
+      setSoldBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -2195,6 +2742,7 @@ function PostDetailPage() {
         <div className="post-detail-card">
           <div className="post-detail-image-wrap">
             <img src={post.imageUrl} alt={post.caption || "Post"} className="post-detail-image" />
+            {post.isSold && <div className="sold-badge sold-badge--detail">SOLD</div>}
           </div>
 
           <div className="post-detail-body">
@@ -2215,11 +2763,46 @@ function PostDetailPage() {
               </div>
             </div>
 
-            {post.caption && (
-              <p className="post-detail-caption">{post.caption}</p>
-            )}
-            {priceLabel && (
-              <p className="post-detail-price">{priceLabel}</p>
+            {editing ? (
+              <div className="post-edit-inline">
+                <textarea
+                  value={editCaption}
+                  onChange={(e) => setEditCaption(e.target.value)}
+                  className="quilt-edit-input"
+                  rows={3}
+                  maxLength={2000}
+                />
+                {isMarket && (
+                  <label className="post-edit-price-label">
+                    Price (USD)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                      className="quilt-edit-input"
+                    />
+                  </label>
+                )}
+                <div className="post-edit-actions">
+                  <button type="button" className="save-button save-button--sm" onClick={saveEdit} disabled={editSaving}>
+                    {editSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button type="button" className="cancel-button cancel-button--sm" onClick={() => setEditing(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {post.caption && (
+                  <p className="post-detail-caption">{post.caption}</p>
+                )}
+                {priceLabel && (
+                  <p className="post-detail-price">{priceLabel}</p>
+                )}
+              </>
             )}
 
             <div className="post-detail-actions">
@@ -2231,6 +2814,51 @@ function PostDetailPage() {
               />
               <PatchButton postId={post.id} />
             </div>
+
+            {isOwner && !editing && (
+              <div className="post-owner-actions">
+                <button
+                  type="button"
+                  className="save-button save-button--sm"
+                  onClick={() => {
+                    setEditCaption(post.caption || "");
+                    setEditPrice(isMarket && post.priceCents ? (post.priceCents / 100).toString() : "");
+                    setEditing(true);
+                  }}
+                >
+                  Edit
+                </button>
+                {isMarket && (
+                  <button
+                    type="button"
+                    className={`save-button save-button--sm ${post.isSold ? "sold-toggle--sold" : ""}`}
+                    onClick={toggleSold}
+                    disabled={soldBusy}
+                  >
+                    {post.isSold ? "Mark as Available" : "Mark as Sold"}
+                  </button>
+                )}
+                {deleteConfirm ? (
+                  <>
+                    <span className="post-delete-confirm-text">Delete this post?</span>
+                    <button type="button" className="cancel-button cancel-button--sm" onClick={deletePost}>
+                      Yes, delete
+                    </button>
+                    <button type="button" className="save-button save-button--sm" onClick={() => setDeleteConfirm(false)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="quilt-delete-btn"
+                    onClick={() => setDeleteConfirm(true)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
 
             <CommentSection postId={post.id} postOwnerId={post.userId} />
           </div>
@@ -2285,6 +2913,50 @@ function LikeButton({ postId, initialLiked, initialCount, onLikeChange }) {
   );
 }
 
+function CommentLikeButton({ postId, commentId, initialLiked, initialCount }) {
+  const [liked, setLiked] = useState(Boolean(initialLiked));
+  const [count, setCount] = useState(initialCount || 0);
+  const [busy, setBusy] = useState(false);
+
+  async function toggleLike() {
+    if (busy) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setBusy(true);
+    const method = liked ? "DELETE" : "POST";
+    try {
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments/${commentId}/like`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setLiked(data.liked);
+        setCount(data.likeCount);
+      }
+    } catch (err) {
+      console.error("Comment like toggle failed:", err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={`comment-like-btn ${liked ? "comment-like-btn--active" : ""}`}
+      onClick={toggleLike}
+      disabled={busy}
+    >
+      <svg viewBox="0 0 24 24" fill={liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+      </svg>
+      {count > 0 && <span>{count}</span>}
+    </button>
+  );
+}
+
 function PatchButton({ postId }) {
   const [open, setOpen] = useState(false);
 
@@ -2297,7 +2969,8 @@ function PatchButton({ postId }) {
         title="Save to quilt"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+          <rect x="3" y="3" width="18" height="18" rx="1" />
+          <rect x="5" y="5" width="14" height="14" rx="0.5" strokeDasharray="2 1.5" />
         </svg>
       </button>
       <QuiltPickerModal
@@ -2332,7 +3005,10 @@ function CommentSection({ postId, postOwnerId }) {
     async function fetchComments() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`);
+        const headers = {};
+        const token = localStorage.getItem("token");
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`, { headers });
         const data = await parseApiResponse(res);
         if (res.ok && isMounted) {
           setComments(Array.isArray(data?.comments) ? data.comments : []);
@@ -2454,6 +3130,7 @@ function CommentSection({ postId, postOwnerId }) {
                 <span className="comment-body">{c.body}</span>
               </div>
               <div className="comment-actions">
+                <CommentLikeButton postId={postId} commentId={c.id} initialLiked={c.userLiked} initialCount={c.likeCount} />
                 <button
                   type="button"
                   className="comment-reply-btn"
@@ -2480,6 +3157,7 @@ function CommentSection({ postId, postOwnerId }) {
                         <span className="comment-body">{r.body}</span>
                       </div>
                       <div className="comment-actions">
+                        <CommentLikeButton postId={postId} commentId={r.id} initialLiked={r.userLiked} initialCount={r.likeCount} />
                         <button
                           type="button"
                           className="comment-reply-btn"
@@ -2696,6 +3374,487 @@ function QuiltPickerModal({ isOpen, onClose, postId }) {
             {saving ? "..." : "Create & save"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MessagesPage({ currentUser }) {
+  const [conversations, setConversations] = useState([]);
+  const [activeConvoId, setActiveConvoId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [msgBody, setMsgBody] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [newConvoOpen, setNewConvoOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [convoDetail, setConvoDetail] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const socketRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  // Fetch conversations
+  useEffect(() => {
+    async function fetchConversations() {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/messages/conversations`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await parseApiResponse(res);
+        if (res.ok) {
+          setConversations(Array.isArray(data?.conversations) ? data.conversations : []);
+        }
+      } catch {
+        // silent
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchConversations();
+  }, []);
+
+  // Socket.IO connection
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    let socket;
+    async function connectSocket() {
+      const { io } = await import("socket.io-client");
+      const socketUrl = API_BASE_URL.replace("/api", "");
+      socket = io(socketUrl || window.location.origin, {
+        auth: { token },
+      });
+      socketRef.current = socket;
+
+      socket.on("new_message", ({ message, conversationId }) => {
+        // Update messages if viewing that conversation
+        if (conversationId === activeConvoId) {
+          setMessages((prev) => [...prev, message]);
+        }
+        // Update conversation list (move to top, update last message)
+        setConversations((prev) => {
+          const updated = prev.map((c) =>
+            c.id === conversationId
+              ? { ...c, messages: [message], updatedAt: new Date().toISOString() }
+              : c
+          );
+          updated.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+          return updated;
+        });
+      });
+
+      socket.on("conversation_updated", ({ conversation }) => {
+        setConversations((prev) => {
+          if (prev.find((c) => c.id === conversation.id)) return prev;
+          return [conversation, ...prev];
+        });
+      });
+    }
+
+    connectSocket();
+
+    return () => {
+      if (socket) socket.disconnect();
+    };
+  }, [activeConvoId]);
+
+  // Auto-scroll messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Fetch messages when active conversation changes
+  useEffect(() => {
+    if (!activeConvoId) {
+      setMessages([]);
+      setConvoDetail(null);
+      return;
+    }
+
+    let isMounted = true;
+    async function fetchMessages() {
+      setMsgLoading(true);
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/messages/conversations/${activeConvoId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setMessages(Array.isArray(data?.messages) ? data.messages : []);
+          setConvoDetail(data?.conversation || null);
+        }
+      } catch {
+        // silent
+      } finally {
+        if (isMounted) setMsgLoading(false);
+      }
+    }
+    fetchMessages();
+    return () => { isMounted = false; };
+  }, [activeConvoId]);
+
+  async function sendMessage(e) {
+    e.preventDefault();
+    if (!msgBody.trim() || sending || !activeConvoId) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setSending(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/messages/conversations/${activeConvoId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ body: msgBody.trim() }),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setMessages((prev) => [...prev, data.message]);
+        setMsgBody("");
+        // Update conversation list
+        setConversations((prev) => {
+          const updated = prev.map((c) =>
+            c.id === activeConvoId
+              ? { ...c, messages: [data.message], updatedAt: new Date().toISOString() }
+              : c
+          );
+          updated.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+          return updated;
+        });
+      }
+    } catch {
+      // silent
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function searchUsers(query) {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchLoading(true);
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`${API_BASE_URL}/users/search?q=${encodeURIComponent(query)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setSearchResults(
+          (Array.isArray(data?.users) ? data.users : []).filter(
+            (u) => u.id !== currentUser?.id
+          )
+        );
+      }
+    } catch {
+      // silent
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (searchQuery.trim()) searchUsers(searchQuery);
+      else setSearchResults([]);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
+
+  async function startConversation() {
+    if (!selectedUsers.length) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/messages/conversations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ participantIds: selectedUsers.map((u) => u.id) }),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        const convo = data.conversation;
+        if (!data.existing) {
+          setConversations((prev) => [convo, ...prev]);
+        }
+        setActiveConvoId(convo.id);
+        setNewConvoOpen(false);
+        setSelectedUsers([]);
+        setSearchQuery("");
+        setSearchResults([]);
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  async function deleteConversation(convoId) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/messages/conversations/${convoId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c.id !== convoId));
+        if (activeConvoId === convoId) {
+          setActiveConvoId(null);
+        }
+        setDeleteConfirmId(null);
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  function getConvoName(convo) {
+    const others = (convo.participants || [])
+      .filter((p) => p.user?.id !== currentUser?.id)
+      .map((p) => p.user?.name || p.user?.username || "Unknown");
+    return others.join(", ") || "Conversation";
+  }
+
+  function getConvoAvatar(convo) {
+    const other = (convo.participants || []).find((p) => p.user?.id !== currentUser?.id);
+    return other?.user || null;
+  }
+
+  function formatMsgTime(dateStr) {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffDays === 0) {
+      return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    }
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return d.toLocaleDateString("en-US", { weekday: "short" });
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  return (
+    <div className="feed-content">
+      <div className="messages-page">
+        {/* Conversation List */}
+        <div className="conversations-list">
+          <div className="conversations-list-header">
+            <h2>Messages</h2>
+            <button
+              type="button"
+              className="new-convo-btn"
+              onClick={() => setNewConvoOpen(true)}
+              title="New conversation"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <line x1="12" y1="8" x2="12" y2="14" />
+                <line x1="9" y1="11" x2="15" y2="11" />
+              </svg>
+            </button>
+          </div>
+
+          {loading ? (
+            <p className="comment-empty">Loading...</p>
+          ) : conversations.length === 0 ? (
+            <p className="comment-empty">No conversations yet.</p>
+          ) : (
+            conversations.map((convo) => {
+              const lastMsg = convo.messages?.[0];
+              const convoUser = getConvoAvatar(convo);
+              return (
+                <div
+                  key={convo.id}
+                  className={`conversation-item${activeConvoId === convo.id ? " conversation-item--active" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="conversation-item-btn"
+                    onClick={() => setActiveConvoId(convo.id)}
+                  >
+                    <ProfilePatch name={convoUser?.name} imageUrl={convoUser?.profilePicture} />
+                    <div className="conversation-item-info">
+                      <span className="conversation-item-name">{getConvoName(convo)}</span>
+                      {lastMsg && (
+                        <span className="conversation-item-preview">
+                          {lastMsg.sender?.id === currentUser?.id ? "You: " : ""}
+                          {lastMsg.body?.substring(0, 40)}{lastMsg.body?.length > 40 ? "..." : ""}
+                        </span>
+                      )}
+                    </div>
+                    {lastMsg && (
+                      <span className="conversation-item-time">
+                        {formatMsgTime(lastMsg.createdAt)}
+                      </span>
+                    )}
+                  </button>
+                  {deleteConfirmId === convo.id ? (
+                    <div className="conversation-delete-confirm">
+                      <button type="button" className="cancel-button cancel-button--sm" onClick={() => deleteConversation(convo.id)}>
+                        Delete
+                      </button>
+                      <button type="button" className="save-button save-button--sm" onClick={() => setDeleteConfirmId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="conversation-delete-btn"
+                      onClick={() => setDeleteConfirmId(convo.id)}
+                      title="Leave conversation"
+                    >
+                      &times;
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Chat Panel */}
+        <div className="chat-panel">
+          {activeConvoId ? (
+            <>
+              <div className="chat-header">
+                <h3>{convoDetail ? getConvoName(convoDetail) : "..."}</h3>
+                {convoDetail && convoDetail.participants?.length > 2 && (
+                  <span className="chat-header-count">
+                    {convoDetail.participants.length} members
+                  </span>
+                )}
+              </div>
+              <div className="chat-messages">
+                {msgLoading ? (
+                  <p className="comment-empty">Loading messages...</p>
+                ) : messages.length === 0 ? (
+                  <p className="comment-empty">No messages yet. Say hello!</p>
+                ) : (
+                  messages.map((msg) => {
+                    const isOwn = msg.sender?.id === currentUser?.id || msg.senderId === currentUser?.id;
+                    return (
+                      <div key={msg.id} className={`chat-bubble ${isOwn ? "chat-bubble--own" : "chat-bubble--other"}`}>
+                        {!isOwn && (
+                          <span className="chat-bubble-sender">{msg.sender?.name || msg.sender?.username}</span>
+                        )}
+                        <p className="chat-bubble-body">{msg.body}</p>
+                        <span className="chat-bubble-time">{formatMsgTime(msg.createdAt)}</span>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              <form className="chat-input" onSubmit={sendMessage}>
+                <input
+                  type="text"
+                  value={msgBody}
+                  onChange={(e) => setMsgBody(e.target.value)}
+                  placeholder="Type a message..."
+                  maxLength={2000}
+                />
+                <button type="submit" disabled={sending || !msgBody.trim()}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="chat-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <p>Select a conversation or start a new one</p>
+            </div>
+          )}
+        </div>
+
+        {/* New Conversation Modal */}
+        {newConvoOpen && (
+          <div className="create-post-overlay" role="dialog" aria-modal="true" onClick={() => setNewConvoOpen(false)}>
+            <div className="new-convo-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="create-post-header">
+                <h2>New conversation</h2>
+                <button type="button" className="create-post-close" onClick={() => { setNewConvoOpen(false); setSelectedUsers([]); setSearchQuery(""); }}>
+                  Close
+                </button>
+              </div>
+              <div className="new-convo-search">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search users..."
+                />
+              </div>
+              {selectedUsers.length > 0 && (
+                <div className="new-convo-selected">
+                  {selectedUsers.map((u) => (
+                    <span key={u.id} className="brand-selected-item">
+                      @{u.username}
+                      <button type="button" onClick={() => setSelectedUsers((prev) => prev.filter((s) => s.id !== u.id))}>
+                        remove
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="new-convo-results">
+                {searchLoading ? (
+                  <p className="comment-empty">Searching...</p>
+                ) : searchResults.length === 0 && searchQuery.trim() ? (
+                  <p className="comment-empty">No users found.</p>
+                ) : (
+                  searchResults
+                    .filter((u) => !selectedUsers.find((s) => s.id === u.id))
+                    .map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className="follow-list-item-link"
+                        onClick={() => setSelectedUsers((prev) => [...prev, u])}
+                      >
+                        <ProfilePatch name={u.name} imageUrl={u.profilePicture} />
+                        <div className="follow-list-item-info">
+                          <span className="follow-list-item-name">{u.name}</span>
+                          <span className="follow-list-item-handle">@{u.username}</span>
+                        </div>
+                      </button>
+                    ))
+                )}
+              </div>
+              <button
+                type="button"
+                className="save-button"
+                onClick={startConversation}
+                disabled={!selectedUsers.length}
+              >
+                Start conversation
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

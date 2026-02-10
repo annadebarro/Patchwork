@@ -8,6 +8,7 @@ const quiltsRouter = require("./quilts");
 const usersRouter = require("./users");
 const followsRouter = require("./follows");
 const notificationsRouter = require("./notifications");
+const messagesRouter = require("./messages");
 
 function registerRoutes(app) {
   app.use("/api/health", healthRouter);
@@ -20,6 +21,7 @@ function registerRoutes(app) {
   app.use("/api/users", usersRouter);
   app.use("/api/follows", followsRouter);
   app.use("/api/notifications", notificationsRouter);
+  app.use("/api/messages", messagesRouter);
 }
 
 module.exports = { registerRoutes };

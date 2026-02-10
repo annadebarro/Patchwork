@@ -1,6 +1,7 @@
 const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
+const { optionalAuthMiddleware } = require("../middleware/auth");
 const { fn, col } = require("sequelize");
 
 const router = express.Router();
@@ -63,7 +64,7 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 });
 
-router.get("/:quiltId", authMiddleware, async (req, res) => {
+router.get("/:quiltId", optionalAuthMiddleware, async (req, res) => {
   const { Quilt, Patch, Post, User } = getModels();
   const { quiltId } = req.params;
 
@@ -94,14 +95,58 @@ router.get("/:quiltId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Quilt not found." });
     }
 
-    if (quilt.userId !== req.user.id) {
-      return res.status(403).json({ message: "Forbidden." });
+    if (!quilt.isPublic && (!req.user || quilt.userId !== req.user.id)) {
+      return res.status(403).json({ message: "This quilt is private." });
     }
 
     return res.json({ quilt });
   } catch (err) {
     console.error("Quilt detail fetch failed:", err);
     return res.status(500).json({ message: "Failed to fetch quilt." });
+  }
+});
+
+router.patch("/:quiltId", authMiddleware, async (req, res) => {
+  const { Quilt } = getModels();
+  const { quiltId } = req.params;
+  const { name, description, isPublic } = req.body || {};
+
+  try {
+    const quilt = await Quilt.findByPk(quiltId);
+    if (!quilt) {
+      return res.status(404).json({ message: "Quilt not found." });
+    }
+
+    if (quilt.userId !== req.user.id) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ message: "Quilt name cannot be empty." });
+      }
+      const trimmedName = name.trim();
+      if (trimmedName.length > MAX_QUILT_NAME_LENGTH) {
+        return res.status(400).json({
+          message: `Quilt name cannot exceed ${MAX_QUILT_NAME_LENGTH} characters.`,
+        });
+      }
+      quilt.name = trimmedName;
+    }
+
+    if (description !== undefined) {
+      quilt.description = typeof description === "string" ? description.trim() : "";
+    }
+
+    if (isPublic !== undefined) {
+      quilt.isPublic = Boolean(isPublic);
+    }
+
+    await quilt.save();
+    return res.json({ quilt });
+  } catch (err) {
+    console.error("Quilt update failed:", err);
+    return res.status(500).json({ message: "Failed to update quilt." });
   }
 });
 

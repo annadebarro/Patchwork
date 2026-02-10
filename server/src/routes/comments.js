@@ -1,14 +1,15 @@
 const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
+const { optionalAuthMiddleware } = require("../middleware/auth");
 const { Op } = require("sequelize");
 
 const router = express.Router({ mergeParams: true });
 
 const MAX_COMMENT_LENGTH = 1000;
 
-router.get("/:postId/comments", async (req, res) => {
-  const { Comment, User, Post } = getModels();
+router.get("/:postId/comments", optionalAuthMiddleware, async (req, res) => {
+  const { Comment, User, Post, CommentLike } = getModels();
   const { postId } = req.params;
 
   try {
@@ -41,7 +42,61 @@ router.get("/:postId/comments", async (req, res) => {
       ],
     });
 
-    return res.json({ comments });
+    // Collect all comment IDs (top-level + replies)
+    const allCommentIds = [];
+    for (const c of comments) {
+      allCommentIds.push(c.id);
+      if (c.replies) {
+        for (const r of c.replies) {
+          allCommentIds.push(r.id);
+        }
+      }
+    }
+
+    // Fetch like counts in bulk
+    const likeCounts = await CommentLike.findAll({
+      where: { commentId: { [Op.in]: allCommentIds } },
+      attributes: [
+        "commentId",
+        [CommentLike.sequelize.fn("COUNT", CommentLike.sequelize.col("id")), "cnt"],
+      ],
+      group: ["commentId"],
+      raw: true,
+    });
+    const likeCountMap = {};
+    for (const row of likeCounts) {
+      likeCountMap[row.commentId] = parseInt(row.cnt, 10);
+    }
+
+    // Fetch user's likes if authenticated
+    const userLikedSet = new Set();
+    if (req.user) {
+      const userLikes = await CommentLike.findAll({
+        where: { userId: req.user.id, commentId: { [Op.in]: allCommentIds } },
+        attributes: ["commentId"],
+        raw: true,
+      });
+      for (const ul of userLikes) {
+        userLikedSet.add(ul.commentId);
+      }
+    }
+
+    // Attach likeCount and userLiked to each comment/reply
+    const commentsJson = comments.map((c) => {
+      const cj = c.toJSON();
+      cj.likeCount = likeCountMap[cj.id] || 0;
+      cj.userLiked = userLikedSet.has(cj.id);
+      if (cj.replies) {
+        cj.replies = cj.replies.map((r) => ({
+          ...r,
+          likeCount: likeCountMap[r.id] || 0,
+          userLiked: userLikedSet.has(r.id),
+        }));
+      }
+      return cj;
+    });
+
+    return res.json({ comments: commentsJson });
   } catch (err) {
     console.error("Comment fetch failed:", err);
     return res.status(500).json({ message: "Failed to fetch comments." });
@@ -141,6 +196,58 @@ router.post("/:postId/comments", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("Comment creation failed:", err);
     return res.status(500).json({ message: "Failed to create comment." });
+  }
+});
+
+router.post("/:postId/comments/:commentId/like", authMiddleware, async (req, res) => {
+  const { Comment, CommentLike, Notification } = getModels();
+  const { postId, commentId } = req.params;
+
+  try {
+    const comment = await Comment.findByPk(commentId);
+    if (!comment || comment.postId !== postId) {
+      return res.status(404).json({ message: "Comment not found." });
+    }
+
+    const [, created] = await CommentLike.findOrCreate({
+      where: { userId: req.user.id, commentId },
+      defaults: { userId: req.user.id, commentId },
+    });
+
+    if (created && comment.userId !== req.user.id) {
+      await Notification.create({
+        userId: comment.userId,
+        actorId: req.user.id,
+        type: "comment_like",
+        postId,
+      });
+    }
+
+    const likeCount = await CommentLike.count({ where: { commentId } });
+    return res.json({ liked: true, likeCount });
+  } catch (err) {
+    console.error("Comment like failed:", err);
+    return res.status(500).json({ message: "Failed to like comment." });
+  }
+});
+
+router.delete("/:postId/comments/:commentId/like", authMiddleware, async (req, res) => {
+  const { Comment, CommentLike } = getModels();
+  const { postId, commentId } = req.params;
+
+  try {
+    const comment = await Comment.findByPk(commentId);
+    if (!comment || comment.postId !== postId) {
+      return res.status(404).json({ message: "Comment not found." });
+    }
+
+    await CommentLike.destroy({ where: { userId: req.user.id, commentId } });
+
+    const likeCount = await CommentLike.count({ where: { commentId } });
+    return res.json({ liked: false, likeCount });
+  } catch (err) {
+    console.error("Comment unlike failed:", err);
+    return res.status(500).json({ message: "Failed to unlike comment." });
   }
 });
 

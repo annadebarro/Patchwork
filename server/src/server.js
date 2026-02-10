@@ -1,6 +1,9 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
+const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 const { connectToDatabase } = require("./config/db");
 const { initModels } = require("./models");
 const { registerRoutes } = require("./routes");
@@ -182,9 +185,52 @@ async function bootstrap() {
     const sequelize = await connectToDatabase(process.env.DATABASE_URL);
     initModels(sequelize);
     await ensureUserPreferenceColumns(sequelize);
+
+    // Ensure new enum values exist before sync
+    await sequelize.query(
+      `DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_notifications_type') THEN
+            BEGIN
+              ALTER TYPE "enum_notifications_type" ADD VALUE IF NOT EXISTS 'message';
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END;
+          END IF;
+        END
+      $$;`,
+      {}
+    );
+
     await sequelize.sync({ alter: true });
 
-    server = app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+    const io = new Server(httpServer, { cors: corsOptions });
+
+    // Socket.IO JWT authentication middleware
+    io.use((socket, next) => {
+      const token = socket.handshake.auth?.token;
+      if (!token) {
+        return next(new Error("Authentication required"));
+      }
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "change-me");
+        socket.userId = decoded.id;
+        next();
+      } catch {
+        next(new Error("Invalid token"));
+      }
+    });
+
+    io.on("connection", (socket) => {
+      // Join the user to their own room
+      socket.join(socket.userId);
+      socket.on("disconnect", () => {});
+    });
+
+    // Store io on app so routes can emit events
+    app.set("io", io);
+
+    server = httpServer.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
       console.log("Server is ready to accept connections...");
     });
