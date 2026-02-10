@@ -33,7 +33,7 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 
 - Our Backend will be made up of:
     - Node.js/Express Server to host the site
-    - MongoDB to store information and posts
+    - Postgres to store information and posts
 
 - What does the Node.js/Express Server consist of?
     - Authentication Service
@@ -58,10 +58,48 @@ From the social side, Patchwork creates an all-in-one platform to share your int
   - `cp server/.env.example server/.env` and update `DATABASE_URL` if needed
   - `npm run setup` (installs both backend and frontend dependencies)
 - Optional: set `client/.env` from `client/.env.example` when pointing the UI to a non-local API.
+- Run database migrations before starting the API:
+  - Fresh database: `npm run db:migrate --prefix server`
+  - Existing pre-migration database (one-time): `npm run db:baseline --prefix server` then `npm run db:migrate --prefix server`
 - Run the stack locally:
   - API: `npm run dev --prefix server` (listens on port 5000)
   - Frontend: `npm run dev --prefix client` (listens on port 5173 with an API proxy to \`/api\`)
 - Health check is at `/api/health`; the frontend displays API/DB status on load.
+
+## Database Migrations From a Fresh Terminal
+
+Run these commands from the project root.
+
+### macOS/Linux (zsh/bash)
+
+```bash
+cd /path/to/Patchwork
+npm run db:migrate --prefix server
+npm run dev --prefix server
+```
+
+### Windows (PowerShell)
+
+```powershell
+cd C:\path\to\Patchwork
+npm run db:migrate --prefix server
+npm run dev --prefix server
+```
+
+### Windows (Command Prompt)
+
+```bat
+cd C:\path\to\Patchwork
+npm run db:migrate --prefix server
+npm run dev --prefix server
+```
+
+If you already had a local database from before migrations were introduced, run this once first:
+
+```bash
+npm run db:baseline --prefix server
+npm run db:migrate --prefix server
+```
 
 ## Project Structure
 
