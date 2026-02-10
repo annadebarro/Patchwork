@@ -6,6 +6,8 @@ const likesRouter = require("./likes");
 const commentsRouter = require("./comments");
 const quiltsRouter = require("./quilts");
 const usersRouter = require("./users");
+const followsRouter = require("./follows");
+const notificationsRouter = require("./notifications");
 
 function registerRoutes(app) {
   app.use("/api/health", healthRouter);
@@ -16,6 +18,8 @@ function registerRoutes(app) {
   app.use("/api/posts", commentsRouter);
   app.use("/api/quilts", quiltsRouter);
   app.use("/api/users", usersRouter);
+  app.use("/api/follows", followsRouter);
+  app.use("/api/notifications", notificationsRouter);
 }
 
 module.exports = { registerRoutes };

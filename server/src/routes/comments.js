@@ -63,6 +63,16 @@ router.post("/:postId/comments", authMiddleware, async (req, res) => {
       body: trimmedBody,
     });
 
+    if (post.userId !== req.user.id) {
+      const { Notification } = getModels();
+      await Notification.create({
+        userId: post.userId,
+        actorId: req.user.id,
+        type: "comment",
+        postId,
+      });
+    }
+
     const commentWithAuthor = await Comment.findByPk(comment.id, {
       include: [
         {

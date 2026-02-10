@@ -1,10 +1,11 @@
 const express = require("express");
 const { getModels } = require("../models");
+const { optionalAuthMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/:username", async (req, res) => {
-  const { User, Post } = getModels();
+router.get("/:username", optionalAuthMiddleware, async (req, res) => {
+  const { User, Post, Follow } = getModels();
   const { username } = req.params;
 
   try {
@@ -17,21 +18,34 @@ router.get("/:username", async (req, res) => {
       return res.status(404).json({ message: "User not found." });
     }
 
-    const posts = await Post.findAll({
-      where: { userId: user.id, isPublic: true },
-      order: [["createdAt", "DESC"]],
-      include: [
-        {
-          model: User,
-          as: "author",
-          attributes: ["id", "username", "name", "profilePicture"],
-        },
-      ],
-    });
+    const [posts, followerCount, followingCount] = await Promise.all([
+      Post.findAll({
+        where: { userId: user.id, isPublic: true },
+        order: [["createdAt", "DESC"]],
+        include: [
+          {
+            model: User,
+            as: "author",
+            attributes: ["id", "username", "name", "profilePicture"],
+          },
+        ],
+      }),
+      Follow.count({ where: { followeeId: user.id } }),
+      Follow.count({ where: { followerId: user.id } }),
+    ]);
+
+    let isFollowing = false;
+    if (req.user) {
+      const existingFollow = await Follow.findOne({
+        where: { followerId: req.user.id, followeeId: user.id },
+      });
+      isFollowing = Boolean(existingFollow);
+    }
 
     return res.json({
-      user: user.toJSON(),
+      user: { ...user.toJSON(), followerCount, followingCount },
       posts,
+      isFollowing,
     });
   } catch (err) {
     console.error("User profile fetch failed:", err);

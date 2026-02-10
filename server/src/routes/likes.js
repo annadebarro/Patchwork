@@ -5,7 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const router = express.Router({ mergeParams: true });
 
 router.post("/:postId/like", authMiddleware, async (req, res) => {
-  const { Like, Post } = getModels();
+  const { Like, Post, Notification } = getModels();
   const { postId } = req.params;
 
   try {
@@ -14,10 +14,19 @@ router.post("/:postId/like", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Post not found." });
     }
 
-    await Like.findOrCreate({
+    const [, created] = await Like.findOrCreate({
       where: { userId: req.user.id, postId },
       defaults: { userId: req.user.id, postId },
     });
+
+    if (created && post.userId !== req.user.id) {
+      await Notification.create({
+        userId: post.userId,
+        actorId: req.user.id,
+        type: "like",
+        postId,
+      });
+    }
 
     const likeCount = await Like.count({ where: { postId } });
     return res.json({ liked: true, likeCount });

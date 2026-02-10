@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -414,6 +414,7 @@ function App() {
           element={
             <RequireAuth user={user}>
               <AuthedLayout
+                user={user}
                 onLogout={handleLogout}
                 onOpenCreatePost={() => setCreatePostOpen(true)}
               />
@@ -426,7 +427,7 @@ function App() {
             <Route path="marketplace" element={<MarketplaceHome refreshKey={postRefreshKey} />} />
           </Route>
           <Route path="/post/:postId" element={<PostDetailPage />} />
-          <Route path="/userpage/:username" element={<UserPage />} />
+          <Route path="/userpage/:username" element={<UserPage currentUser={user} />} />
           <Route
             path="/profile"
             element={<UserPage user={user} isOwnProfile refreshKey={postRefreshKey} />}
@@ -589,7 +590,82 @@ function PatchLogo({ className }) {
   );
 }
 
-function AuthedLayout({ onLogout, onOpenCreatePost }) {
+function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
+  const navigate = useNavigate();
+  const [notifPanelOpen, setNotifPanelOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const pollRef = useRef(null);
+
+  const fetchNotifications = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
+        setUnreadCount(data?.unreadCount || 0);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    pollRef.current = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(pollRef.current);
+  }, [fetchNotifications]);
+
+  async function openNotifPanel() {
+    setNotifPanelOpen(true);
+    if (unreadCount > 0) {
+      const token = localStorage.getItem("token");
+      if (token) {
+        try {
+          await fetch(`${API_BASE_URL}/notifications/read`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          setUnreadCount(0);
+          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        } catch {
+          // silent
+        }
+      }
+    }
+  }
+
+  function formatNotifMessage(notif) {
+    const actor = notif.actor?.username || "Someone";
+    switch (notif.type) {
+      case "like":
+        return `@${actor} liked your post`;
+      case "comment":
+        return `@${actor} commented on your post`;
+      case "follow":
+        return `@${actor} started following you`;
+      case "patch":
+        return `@${actor} saved your post to a quilt`;
+      default:
+        return `@${actor} interacted with you`;
+    }
+  }
+
+  function formatTimeAgo(dateStr) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d`;
+  }
+
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
@@ -618,17 +694,26 @@ function AuthedLayout({ onLogout, onOpenCreatePost }) {
               <circle cx="12" cy="7" r="4" />
             </svg>
           </NavLink>
-          <NavLink to="/home/messages" className="sidebar-icon" title="Messages">
+          <NavLink to="/home/messages" className="sidebar-icon sidebar-icon--messages" title="Messages">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>
           </NavLink>
-          <NavLink to="/home/likes" className="sidebar-icon" title="Likes">
+          <button
+            className={`sidebar-icon sidebar-icon--notif ${notifPanelOpen ? "active" : ""}`}
+            title="Notifications"
+            type="button"
+            onClick={() => notifPanelOpen ? setNotifPanelOpen(false) : openNotifPanel()}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
             </svg>
-          </NavLink>
+            {unreadCount > 0 && (
+              <span className="notif-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>
+            )}
+          </button>
           <button
             className="sidebar-icon"
             title="Create Post"
@@ -645,6 +730,61 @@ function AuthedLayout({ onLogout, onOpenCreatePost }) {
           Log out
         </button>
       </aside>
+
+      {/* Notification Panel */}
+      {notifPanelOpen && (
+        <div className="notif-panel">
+          <div className="notif-panel-header">
+            <h3>Notifications</h3>
+            <button
+              type="button"
+              className="notif-panel-close"
+              onClick={() => setNotifPanelOpen(false)}
+            >
+              &times;
+            </button>
+          </div>
+          <div className="notif-panel-list">
+            {notifications.length === 0 ? (
+              <p className="notif-empty">No notifications yet.</p>
+            ) : (
+              notifications.map((notif) => (
+                <button
+                  key={notif.id}
+                  type="button"
+                  className={`notif-item ${!notif.read ? "notif-item--unread" : ""}`}
+                  onClick={() => {
+                    setNotifPanelOpen(false);
+                    if (notif.type === "follow") {
+                      navigate(`/userpage/${notif.actor?.username}`);
+                    } else if (notif.postId) {
+                      navigate(`/post/${notif.postId}`);
+                    }
+                  }}
+                >
+                  <div className="notif-item-avatar">
+                    <ProfilePatch
+                      name={notif.actor?.name}
+                      imageUrl={notif.actor?.profilePicture}
+                    />
+                  </div>
+                  <div className="notif-item-content">
+                    <p className="notif-item-text">{formatNotifMessage(notif)}</p>
+                    <span className="notif-item-time">{formatTimeAgo(notif.createdAt)}</span>
+                  </div>
+                  {notif.post?.imageUrl && (
+                    <img
+                      className="notif-item-thumb"
+                      src={notif.post.imageUrl}
+                      alt=""
+                    />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="main-content">
@@ -994,13 +1134,18 @@ function ProfilePatch({ name, imageUrl }) {
   );
 }
 
-function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
+function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
   const { username } = useParams();
   const navigate = useNavigate();
   const [profileUser, setProfileUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(true);
   const [postsError, setPostsError] = useState("");
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followListType, setFollowListType] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -1012,23 +1157,46 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
       try {
         if (isOwnProfile) {
           const token = localStorage.getItem("token");
-          const res = await fetch(`${API_BASE_URL}/posts/mine`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await parseApiResponse(res);
-          if (!res.ok) {
-            if (isMounted) setPostsError(data?.message || `Failed to load posts (${res.status})`);
+          const [postsRes, profileRes] = await Promise.all([
+            fetch(`${API_BASE_URL}/posts/mine`, {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            user?.username
+              ? fetch(`${API_BASE_URL}/users/${encodeURIComponent(user.username)}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                })
+              : null,
+          ]);
+
+          const postsData = await parseApiResponse(postsRes);
+          if (!postsRes.ok) {
+            if (isMounted) setPostsError(postsData?.message || `Failed to load posts (${postsRes.status})`);
           } else if (isMounted) {
-            setPosts(Array.isArray(data?.posts) ? data.posts : []);
+            setPosts(Array.isArray(postsData?.posts) ? postsData.posts : []);
+          }
+
+          if (profileRes) {
+            const profileData = await parseApiResponse(profileRes);
+            if (profileRes.ok && isMounted) {
+              setFollowerCount(profileData.user?.followerCount || 0);
+              setFollowingCount(profileData.user?.followingCount || 0);
+            }
           }
         } else if (username) {
-          const res = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(username)}`);
+          const token = localStorage.getItem("token");
+          const headers = {};
+          if (token) headers.Authorization = `Bearer ${token}`;
+
+          const res = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(username)}`, { headers });
           const data = await parseApiResponse(res);
           if (!res.ok) {
             if (isMounted) setPostsError(data?.message || "User not found.");
           } else if (isMounted) {
             setProfileUser(data.user);
             setPosts(Array.isArray(data?.posts) ? data.posts : []);
+            setFollowerCount(data.user?.followerCount || 0);
+            setFollowingCount(data.user?.followingCount || 0);
+            setIsFollowing(Boolean(data.isFollowing));
           }
         }
       } catch (err) {
@@ -1040,12 +1208,37 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
 
     fetchData();
     return () => { isMounted = false; };
-  }, [isOwnProfile, username, refreshKey]);
+  }, [isOwnProfile, username, refreshKey, user?.username]);
+
+  async function toggleFollow() {
+    if (followBusy || !profileUser) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setFollowBusy(true);
+    const method = isFollowing ? "DELETE" : "POST";
+    try {
+      const res = await fetch(`${API_BASE_URL}/follows/${profileUser.id}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setIsFollowing(data.following);
+        setFollowerCount(data.followerCount);
+      }
+    } catch (err) {
+      console.error("Follow toggle failed:", err);
+    } finally {
+      setFollowBusy(false);
+    }
+  }
 
   const displayUser = isOwnProfile ? user : profileUser;
   const displayName = displayUser?.name || (isOwnProfile ? "Your name" : username || "User");
   const displayUsername = displayUser?.username || username || "username";
   const displayBio = displayUser?.bio || "";
+  const showFollowButton = !isOwnProfile && profileUser && currentUser && currentUser.id !== profileUser.id;
 
   return (
     <div className="feed-content">
@@ -1077,17 +1270,27 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
               Change account info
             </button>
           )}
+          {showFollowButton && (
+            <button
+              className={`follow-button ${isFollowing ? "follow-button--following" : ""}`}
+              type="button"
+              onClick={toggleFollow}
+              disabled={followBusy}
+            >
+              {isFollowing ? "Following" : "Follow"}
+            </button>
+          )}
         </header>
 
         <div className="user-stats">
-          <div className="stat">
-            <span className="stat-value">0</span>
+          <button className="stat" type="button" onClick={() => setFollowListType("followers")}>
+            <span className="stat-value">{followerCount}</span>
             <span className="stat-label">Followers</span>
-          </div>
-          <div className="stat">
-            <span className="stat-value">0</span>
+          </button>
+          <button className="stat" type="button" onClick={() => setFollowListType("following")}>
+            <span className="stat-value">{followingCount}</span>
             <span className="stat-label">Following</span>
-          </div>
+          </button>
         </div>
 
         <div className="user-bio">
@@ -1121,6 +1324,130 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
           )}
         </section>
       </section>
+
+      {followListType && (
+        <FollowListModal
+          userId={(isOwnProfile ? user : profileUser)?.id}
+          type={followListType}
+          currentUserId={(isOwnProfile ? user : currentUser)?.id}
+          onClose={() => setFollowListType(null)}
+          onCountChange={(delta) => {
+            if (followListType === "followers") {
+              setFollowerCount((c) => c + delta);
+            } else {
+              setFollowingCount((c) => c + delta);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function FollowListModal({ userId, type, currentUserId, onClose, onCountChange }) {
+  const navigate = useNavigate();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    let isMounted = true;
+
+    async function fetchList() {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/follows/${userId}/${type}`, { headers });
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setUsers(Array.isArray(data?.users) ? data.users : []);
+        }
+      } catch {
+        // silent
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchList();
+    return () => { isMounted = false; };
+  }, [userId, type]);
+
+  async function toggleFollow(targetUserId, currentlyFollowing) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const method = currentlyFollowing ? "DELETE" : "POST";
+    try {
+      const res = await fetch(`${API_BASE_URL}/follows/${targetUserId}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === targetUserId ? { ...u, isFollowing: !currentlyFollowing } : u
+          )
+        );
+        if (onCountChange) {
+          onCountChange(currentlyFollowing ? -1 : 1);
+        }
+      }
+    } catch (err) {
+      console.error("Follow toggle failed:", err);
+    }
+  }
+
+  const title = type === "followers" ? "Followers" : "Following";
+
+  return (
+    <div className="create-post-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="follow-list-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="create-post-header">
+          <h2>{title}</h2>
+          <button type="button" className="create-post-close" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div className="follow-list-body">
+          {loading ? (
+            <p className="comment-empty">Loading...</p>
+          ) : users.length === 0 ? (
+            <p className="comment-empty">No {type} yet.</p>
+          ) : (
+            users.map((u) => (
+              <div key={u.id} className="follow-list-item">
+                <button
+                  type="button"
+                  className="follow-list-item-link"
+                  onClick={() => {
+                    onClose();
+                    navigate(`/userpage/${u.username}`);
+                  }}
+                >
+                  <ProfilePatch name={u.name} imageUrl={u.profilePicture} />
+                  <div className="follow-list-item-info">
+                    <span className="follow-list-item-name">{u.name}</span>
+                    <span className="follow-list-item-handle">@{u.username}</span>
+                  </div>
+                </button>
+                {currentUserId && currentUserId !== u.id && (
+                  <button
+                    type="button"
+                    className={`follow-button follow-button--sm ${u.isFollowing ? "follow-button--following" : ""}`}
+                    onClick={() => toggleFollow(u.id, u.isFollowing)}
+                  >
+                    {u.isFollowing ? "Following" : "Follow"}
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

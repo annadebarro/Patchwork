@@ -151,10 +151,20 @@ router.post("/:quiltId/patches", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Post not found." });
     }
 
-    const [patch] = await Patch.findOrCreate({
+    const [patch, created] = await Patch.findOrCreate({
       where: { quiltId, postId },
       defaults: { quiltId, postId, userId: req.user.id },
     });
+
+    if (created && post.userId !== req.user.id) {
+      const { Notification } = getModels();
+      await Notification.create({
+        userId: post.userId,
+        actorId: req.user.id,
+        type: "patch",
+        postId,
+      });
+    }
 
     return res.status(201).json({ patch });
   } catch (err) {

@@ -466,6 +466,55 @@ function initModels(sequelize) {
     }
   );
 
+  const Notification = sequelize.define(
+    "Notification",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      actorId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "actor_id",
+      },
+      type: {
+        type: DataTypes.ENUM("like", "comment", "follow", "patch"),
+        allowNull: false,
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "post_id",
+      },
+      read: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+    },
+    {
+      tableName: "notifications",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          fields: ["user_id", "read", "created_at"],
+        },
+      ],
+    }
+  );
+
+  User.hasMany(Notification, { foreignKey: "userId", as: "notifications" });
+  Notification.belongsTo(User, { foreignKey: "actorId", as: "actor" });
+  Notification.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
   User.hasMany(Like, { foreignKey: "userId", as: "likes" });
   Like.belongsTo(User, { foreignKey: "userId", as: "user" });
   Post.hasMany(Like, { foreignKey: "postId", as: "likes" });
@@ -498,6 +547,7 @@ function initModels(sequelize) {
     Comment,
     Quilt,
     Patch,
+    Notification,
   };
 
   return models;
