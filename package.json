@@ -1,3 +1,8 @@
 {
+  "name": "patchwork",
+  "private": true,
+  "scripts": {
+    "setup": "npm install --prefix server && npm install --prefix client"
+  },
   "dependencies": {}
 }

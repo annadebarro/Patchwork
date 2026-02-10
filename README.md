@@ -56,8 +56,7 @@ From the social side, Patchwork creates an all-in-one platform to share your int
 - Requirements: Node.js 18+, npm, and a running Postgres instance.
 - Copy environment files and install dependencies:
   - `cp server/.env.example server/.env` and update `DATABASE_URL` if needed
-  - `npm install --prefix server`
-  - `npm install --prefix client`
+  - `npm run setup` (installs both backend and frontend dependencies)
 - Optional: set `client/.env` from `client/.env.example` when pointing the UI to a non-local API.
 - Run the stack locally:
   - API: `npm run dev --prefix server` (listens on port 5000)
