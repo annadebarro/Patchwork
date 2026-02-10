@@ -65,6 +65,10 @@ From the social side, Patchwork creates an all-in-one platform to share your int
   - API: `npm run dev --prefix server` (listens on port 5000)
   - Frontend: `npm run dev --prefix client` (listens on port 5173 with an API proxy to \`/api\`)
 - Health check is at `/api/health`; the frontend displays API/DB status on load.
+- API boundaries:
+  - Search and discovery queries go through `/api/search`.
+  - Feed ranking/recommendation reads go through `/api/recommendations`.
+  - Post CRUD stays under `/api/posts`.
 
 ## Database Migrations From a Fresh Terminal
 
