@@ -1,6 +1,7 @@
 const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
+const { optionalAuthMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -33,7 +34,7 @@ function clamp(value, min, max) {
 }
 
 router.get("/", async (req, res) => {
-  const { Post } = getModels();
+  const { Post, User } = getModels();
   const rawType = req.query.type;
   const type = rawType ? normalizeType(rawType) : null;
   const userId = req.query.userId ? String(req.query.userId) : null;
@@ -55,6 +56,13 @@ router.get("/", async (req, res) => {
       order: [["createdAt", "DESC"]],
       limit,
       offset,
+      include: [
+        {
+          model: User,
+          as: "author",
+          attributes: ["id", "username", "name", "profilePicture"],
+        },
+      ],
     });
 
     return res.json({ posts });
@@ -132,6 +140,50 @@ router.post("/", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("Post creation failed:", err);
     return res.status(500).json({ message: "Failed to create post." });
+  }
+});
+
+router.get("/:postId", optionalAuthMiddleware, async (req, res) => {
+  const { Post, User, Like, Comment } = getModels();
+  const { postId } = req.params;
+
+  try {
+    const post = await Post.findByPk(postId, {
+      include: [
+        {
+          model: User,
+          as: "author",
+          attributes: ["id", "username", "name", "profilePicture"],
+        },
+      ],
+    });
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found." });
+    }
+
+    const likeCount = await Like.count({ where: { postId } });
+    const commentCount = await Comment.count({ where: { postId } });
+
+    let userLiked = false;
+    if (req.user) {
+      const existing = await Like.findOne({
+        where: { userId: req.user.id, postId },
+      });
+      userLiked = Boolean(existing);
+    }
+
+    return res.json({
+      post: {
+        ...post.toJSON(),
+        likeCount,
+        commentCount,
+        userLiked,
+      },
+    });
+  } catch (err) {
+    console.error("Post detail fetch failed:", err);
+    return res.status(500).json({ message: "Failed to fetch post." });
   }
 });
 

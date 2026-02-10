@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -425,6 +425,7 @@ function App() {
             <Route path="social" element={<SocialHome refreshKey={postRefreshKey} />} />
             <Route path="marketplace" element={<MarketplaceHome refreshKey={postRefreshKey} />} />
           </Route>
+          <Route path="/post/:postId" element={<PostDetailPage />} />
           <Route path="/userpage/:username" element={<UserPage />} />
           <Route
             path="/profile"
@@ -751,12 +752,22 @@ function PostsGrid({ type, refreshKey }) {
 }
 
 function PostCard({ post }) {
+  const navigate = useNavigate();
   const isMarket = post.type === "market";
   const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
   const caption = typeof post.caption === "string" ? post.caption : "";
+  const authorUsername = post.author?.username;
 
   return (
-    <div className="post-card">
+    <div
+      className="post-card post-card--clickable"
+      onClick={() => navigate(`/post/${post.id}`)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") navigate(`/post/${post.id}`);
+      }}
+    >
       <img src={post.imageUrl} alt={caption || "Post"} />
       {isMarket && (
         <div className="sale-badge">
@@ -767,12 +778,13 @@ function PostCard({ post }) {
           </svg>
         </div>
       )}
-      {(caption || priceLabel) && (
-        <div className="post-meta">
-          {caption && <p className="post-caption">{caption}</p>}
-          {priceLabel && <p className="post-price">{priceLabel}</p>}
-        </div>
-      )}
+      <div className="post-meta">
+        {authorUsername && (
+          <p className="post-author">@{authorUsername}</p>
+        )}
+        {caption && <p className="post-caption">{caption}</p>}
+        {priceLabel && <p className="post-price">{priceLabel}</p>}
+      </div>
     </div>
   );
 }
@@ -985,51 +997,73 @@ function ProfilePatch({ name, imageUrl }) {
 function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
   const { username } = useParams();
   const navigate = useNavigate();
-  const displayName = isOwnProfile ? user?.name || "Your name" : "User name";
-  const displayUsername = isOwnProfile ? user?.username || "your-username" : username || "username";
-  const displayBio = isOwnProfile ? user?.bio || "" : "";
+  const [profileUser, setProfileUser] = useState(null);
   const [posts, setPosts] = useState([]);
-  const [postsLoading, setPostsLoading] = useState(isOwnProfile);
+  const [postsLoading, setPostsLoading] = useState(true);
   const [postsError, setPostsError] = useState("");
 
   useEffect(() => {
-    if (!isOwnProfile) return;
     let isMounted = true;
 
-    async function fetchPosts() {
+    async function fetchData() {
       setPostsLoading(true);
       setPostsError("");
+
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE_URL}/posts/mine`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await parseApiResponse(res);
-        if (!res.ok) {
-          const message = data?.message || `Failed to load posts (${res.status})`;
-          if (isMounted) setPostsError(message);
-        } else if (isMounted) {
-          setPosts(Array.isArray(data?.posts) ? data.posts : []);
+        if (isOwnProfile) {
+          const token = localStorage.getItem("token");
+          const res = await fetch(`${API_BASE_URL}/posts/mine`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await parseApiResponse(res);
+          if (!res.ok) {
+            if (isMounted) setPostsError(data?.message || `Failed to load posts (${res.status})`);
+          } else if (isMounted) {
+            setPosts(Array.isArray(data?.posts) ? data.posts : []);
+          }
+        } else if (username) {
+          const res = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(username)}`);
+          const data = await parseApiResponse(res);
+          if (!res.ok) {
+            if (isMounted) setPostsError(data?.message || "User not found.");
+          } else if (isMounted) {
+            setProfileUser(data.user);
+            setPosts(Array.isArray(data?.posts) ? data.posts : []);
+          }
         }
       } catch (err) {
-        if (isMounted) setPostsError("Network error while loading posts.");
+        if (isMounted) setPostsError("Network error while loading profile.");
       } finally {
         if (isMounted) setPostsLoading(false);
       }
     }
 
-    fetchPosts();
+    fetchData();
+    return () => { isMounted = false; };
+  }, [isOwnProfile, username, refreshKey]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [isOwnProfile, refreshKey]);
+  const displayUser = isOwnProfile ? user : profileUser;
+  const displayName = displayUser?.name || (isOwnProfile ? "Your name" : username || "User");
+  const displayUsername = displayUser?.username || username || "username";
+  const displayBio = displayUser?.bio || "";
 
   return (
     <div className="feed-content">
       <section className="user-page">
+        {!isOwnProfile && (
+          <button
+            className="back-button"
+            type="button"
+            onClick={() => navigate(-1)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+        )}
         <header className="user-header">
-          <ProfilePatch name={displayName} imageUrl={isOwnProfile ? user?.profilePicture : null} />
+          <ProfilePatch name={displayName} imageUrl={displayUser?.profilePicture} />
           <div className="user-header-info">
             <h1 className="user-name">{displayName}</h1>
             <p className="user-handle">@{displayUsername}</p>
@@ -1064,8 +1098,8 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0 }) {
           )}
         </div>
 
-        <section className="user-posts" aria-label="Assigned posts">
-          <h2 className="user-posts-title">Your posts</h2>
+        <section className="user-posts" aria-label="User posts">
+          <h2 className="user-posts-title">{isOwnProfile ? "Your posts" : "Posts"}</h2>
           {postsLoading ? (
             <div className="placeholder">
               <p>Loading posts...</p>
@@ -1745,6 +1779,464 @@ function AccountSettings({ user, onUpdateUser }) {
           </div>
         </form>
       </section>
+    </div>
+  );
+}
+
+function PostDetailPage() {
+  const { postId } = useParams();
+  const navigate = useNavigate();
+  const [post, setPost] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchPost() {
+      setLoading(true);
+      setError("");
+      try {
+        const token = localStorage.getItem("token");
+        const headers = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch(`${API_BASE_URL}/posts/${postId}`, { headers });
+        const data = await parseApiResponse(res);
+        if (!res.ok) {
+          if (isMounted) setError(data?.message || "Failed to load post.");
+        } else if (isMounted) {
+          setPost(data.post);
+        }
+      } catch {
+        if (isMounted) setError("Network error while loading post.");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchPost();
+    return () => { isMounted = false; };
+  }, [postId]);
+
+  const handleLikeChange = useCallback((liked, likeCount) => {
+    setPost((prev) => prev ? { ...prev, userLiked: liked, likeCount } : prev);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="feed-content">
+        <div className="feed-empty">Loading post...</div>
+      </div>
+    );
+  }
+
+  if (error || !post) {
+    return (
+      <div className="feed-content">
+        <div className="feed-empty">{error || "Post not found."}</div>
+      </div>
+    );
+  }
+
+  const isMarket = post.type === "market";
+  const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
+  const timestamp = post.createdAt
+    ? new Date(post.createdAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
+
+  return (
+    <div className="feed-content">
+      <div className="post-detail">
+        <button
+          className="back-button"
+          type="button"
+          onClick={() => navigate(-1)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+
+        <div className="post-detail-card">
+          <div className="post-detail-image-wrap">
+            <img src={post.imageUrl} alt={post.caption || "Post"} className="post-detail-image" />
+          </div>
+
+          <div className="post-detail-body">
+            <div className="post-detail-author-row">
+              <ProfilePatch
+                name={post.author?.name}
+                imageUrl={post.author?.profilePicture}
+              />
+              <div className="post-detail-author-info">
+                <button
+                  type="button"
+                  className="post-detail-author-link"
+                  onClick={() => navigate(`/userpage/${post.author?.username}`)}
+                >
+                  @{post.author?.username}
+                </button>
+                {timestamp && <span className="post-detail-timestamp">{timestamp}</span>}
+              </div>
+            </div>
+
+            {post.caption && (
+              <p className="post-detail-caption">{post.caption}</p>
+            )}
+            {priceLabel && (
+              <p className="post-detail-price">{priceLabel}</p>
+            )}
+
+            <div className="post-detail-actions">
+              <LikeButton
+                postId={post.id}
+                initialLiked={post.userLiked}
+                initialCount={post.likeCount}
+                onLikeChange={handleLikeChange}
+              />
+              <PatchButton postId={post.id} />
+            </div>
+
+            <CommentSection postId={post.id} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LikeButton({ postId, initialLiked, initialCount, onLikeChange }) {
+  const [liked, setLiked] = useState(Boolean(initialLiked));
+  const [count, setCount] = useState(initialCount || 0);
+  const [busy, setBusy] = useState(false);
+
+  async function toggleLike() {
+    if (busy) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setBusy(true);
+    const method = liked ? "DELETE" : "POST";
+    try {
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}/like`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        setLiked(data.liked);
+        setCount(data.likeCount);
+        if (onLikeChange) onLikeChange(data.liked, data.likeCount);
+      }
+    } catch (err) {
+      console.error("Like toggle failed:", err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={`like-button ${liked ? "like-button--active" : ""}`}
+      onClick={toggleLike}
+      disabled={busy}
+    >
+      <svg viewBox="0 0 24 24" fill={liked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+      </svg>
+      <span>{count}</span>
+    </button>
+  );
+}
+
+function PatchButton({ postId }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="patch-button"
+        onClick={() => setOpen(true)}
+        title="Save to quilt"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+        </svg>
+      </button>
+      <QuiltPickerModal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        postId={postId}
+      />
+    </>
+  );
+}
+
+function CommentSection({ postId }) {
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchComments() {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`);
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setComments(Array.isArray(data?.comments) ? data.comments : []);
+        }
+      } catch {
+        // silent fail
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchComments();
+    return () => { isMounted = false; };
+  }, [postId]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!body.trim() || submitting) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ body: body.trim() }),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok && data?.comment) {
+        setComments((prev) => [...prev, data.comment]);
+        setBody("");
+      }
+    } catch (err) {
+      console.error("Comment submit failed:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="comment-section">
+      <h3 className="comment-section-title">Comments</h3>
+      <div className="comment-list">
+        {loading ? (
+          <p className="comment-empty">Loading comments...</p>
+        ) : comments.length === 0 ? (
+          <p className="comment-empty">No comments yet. Be the first!</p>
+        ) : (
+          comments.map((c) => (
+            <div key={c.id} className="comment-item">
+              <span className="comment-author">@{c.author?.username}</span>
+              <span className="comment-body">{c.body}</span>
+            </div>
+          ))
+        )}
+      </div>
+      <form className="comment-form" onSubmit={handleSubmit}>
+        <input
+          type="text"
+          className="comment-input"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Add a comment..."
+          maxLength={1000}
+        />
+        <button
+          type="submit"
+          className="comment-submit"
+          disabled={submitting || !body.trim()}
+        >
+          {submitting ? "..." : "Post"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function QuiltPickerModal({ isOpen, onClose, postId }) {
+  const [quilts, setQuilts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) {
+      setNewName("");
+      setMessage("");
+      return;
+    }
+
+    let isMounted = true;
+    async function fetchQuilts() {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      try {
+        const res = await fetch(`${API_BASE_URL}/quilts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setQuilts(Array.isArray(data?.quilts) ? data.quilts : []);
+        }
+      } catch {
+        // silent
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchQuilts();
+    return () => { isMounted = false; };
+  }, [isOpen]);
+
+  async function saveToQuilt(quiltId) {
+    setSaving(true);
+    setMessage("");
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}/patches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ postId }),
+      });
+      if (res.ok) {
+        setMessage("Saved!");
+        setTimeout(() => onClose(), 800);
+      } else {
+        const data = await parseApiResponse(res);
+        setMessage(data?.message || "Failed to save.");
+      }
+    } catch {
+      setMessage("Network error.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createAndSave() {
+    if (!newName.trim() || saving) return;
+    setSaving(true);
+    setMessage("");
+    const token = localStorage.getItem("token");
+    try {
+      const createRes = await fetch(`${API_BASE_URL}/quilts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      const createData = await parseApiResponse(createRes);
+      if (!createRes.ok) {
+        setMessage(createData?.message || "Failed to create quilt.");
+        return;
+      }
+
+      const quiltId = createData.quilt.id;
+      const patchRes = await fetch(`${API_BASE_URL}/quilts/${quiltId}/patches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ postId }),
+      });
+
+      if (patchRes.ok) {
+        setMessage("Saved!");
+        setTimeout(() => onClose(), 800);
+      } else {
+        const patchData = await parseApiResponse(patchRes);
+        setMessage(patchData?.message || "Created quilt but failed to save post.");
+      }
+    } catch {
+      setMessage("Network error.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="create-post-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="quilt-picker-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="create-post-header">
+          <h2>Save to quilt</h2>
+          <button type="button" className="create-post-close" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {message && (
+          <div className={`settings-message ${message === "Saved!" ? "success" : "error"}`}>
+            {message}
+          </div>
+        )}
+
+        {loading ? (
+          <p className="comment-empty">Loading quilts...</p>
+        ) : (
+          <div className="quilt-picker-list">
+            {quilts.map((q) => (
+              <button
+                key={q.id}
+                type="button"
+                className="quilt-picker-item"
+                onClick={() => saveToQuilt(q.id)}
+                disabled={saving}
+              >
+                {q.name}
+                <span className="quilt-picker-count">{q.patchCount || 0} patches</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="quilt-picker-create">
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New quilt name"
+            maxLength={100}
+          />
+          <button
+            type="button"
+            className="save-button"
+            onClick={createAndSave}
+            disabled={saving || !newName.trim()}
+          >
+            {saving ? "..." : "Create & save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

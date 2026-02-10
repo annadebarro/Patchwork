@@ -332,6 +332,160 @@ function initModels(sequelize) {
   User.hasMany(Post, { foreignKey: "userId", as: "posts" });
   Post.belongsTo(User, { foreignKey: "userId", as: "author" });
 
+  const Like = sequelize.define(
+    "Like",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+    },
+    {
+      tableName: "likes",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["user_id", "post_id"],
+        },
+      ],
+    }
+  );
+
+  const Comment = sequelize.define(
+    "Comment",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+      body: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+      },
+    },
+    {
+      tableName: "comments",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          fields: ["post_id", "created_at"],
+        },
+      ],
+    }
+  );
+
+  const Quilt = sequelize.define(
+    "Quilt",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      description: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: "",
+      },
+    },
+    {
+      tableName: "quilts",
+      timestamps: true,
+      underscored: true,
+    }
+  );
+
+  const Patch = sequelize.define(
+    "Patch",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      quiltId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "quilt_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+    },
+    {
+      tableName: "patches",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["quilt_id", "post_id"],
+        },
+      ],
+    }
+  );
+
+  User.hasMany(Like, { foreignKey: "userId", as: "likes" });
+  Like.belongsTo(User, { foreignKey: "userId", as: "user" });
+  Post.hasMany(Like, { foreignKey: "postId", as: "likes" });
+  Like.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
+  User.hasMany(Comment, { foreignKey: "userId", as: "comments" });
+  Comment.belongsTo(User, { foreignKey: "userId", as: "author" });
+  Post.hasMany(Comment, { foreignKey: "postId", as: "comments" });
+  Comment.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
+  User.hasMany(Quilt, { foreignKey: "userId", as: "quilts" });
+  Quilt.belongsTo(User, { foreignKey: "userId", as: "owner" });
+
+  Quilt.hasMany(Patch, { foreignKey: "quiltId", as: "patches" });
+  Patch.belongsTo(Quilt, { foreignKey: "quiltId", as: "quilt" });
+  Post.hasMany(Patch, { foreignKey: "postId", as: "patches" });
+  Patch.belongsTo(Post, { foreignKey: "postId", as: "post" });
+  User.hasMany(Patch, { foreignKey: "userId", as: "patchesMade" });
+  Patch.belongsTo(User, { foreignKey: "userId", as: "user" });
+
   models = {
     User,
     Follow,
@@ -340,6 +494,10 @@ function initModels(sequelize) {
     Message,
     UserAction,
     Post,
+    Like,
+    Comment,
+    Quilt,
+    Patch,
   };
 
   return models;
