@@ -101,6 +101,19 @@ npm run db:baseline --prefix server
 npm run db:migrate --prefix server
 ```
 
+## Interaction Event Logging (Recommender Pipeline)
+
+- The backend now writes structured interaction events to `user_actions` for core strong actions:
+  - `post_like`, `post_unlike`
+  - `comment_create`, `comment_like`, `comment_unlike`
+  - `user_follow`, `user_unfollow`
+- Logging is enabled by default and can be toggled with `ACTION_LOGGING_ENABLED=true|false` in `server/.env`.
+- Optional request headers can be sent by clients:
+  - `x-pw-surface`: one of `social_feed`, `post_detail`, `profile`, `search_results`, `unknown`
+  - `x-pw-session-id`: UUID session identifier
+- If headers are missing or invalid, values safely fall back to `unknown` (surface) and `null` (session id).
+- Logging is best-effort: if event logging fails, the user-facing mutation still completes normally.
+
 ## Project Structure
 
 - `server/` — Express API with Postgres (Sequelize) connection (entry: `src/server.js`)

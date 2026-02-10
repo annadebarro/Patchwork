@@ -8,6 +8,7 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:status": "sequelize-cli db:migrate:status",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "test:action-logger": "node --test src/services/actionLogger.test.js",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
