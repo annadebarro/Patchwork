@@ -3,6 +3,7 @@ const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
 const { optionalAuthMiddleware } = require("../middleware/auth");
 const { Op } = require("sequelize");
+const { logUserActionSafe } = require("../services/actionLogger");
 
 const router = express.Router({ mergeParams: true });
 
@@ -140,6 +141,21 @@ router.post("/:postId/comments", authMiddleware, async (req, res) => {
       parentId: parentId || null,
     });
 
+    await logUserActionSafe({
+      req,
+      userId: req.user.id,
+      actionType: "comment_create",
+      targetType: "comment",
+      targetId: comment.id,
+      metadata: {
+        route: "/api/posts/:postId/comments",
+        method: req.method,
+        postId,
+        parentId: parentId || null,
+        isReply: Boolean(parentId),
+      },
+    });
+
     // Notify post owner about the comment (if commenter is not the post owner)
     if (post.userId !== req.user.id) {
       await Notification.create({
@@ -214,13 +230,29 @@ router.post("/:postId/comments/:commentId/like", authMiddleware, async (req, res
       defaults: { userId: req.user.id, commentId },
     });
 
-    if (created && comment.userId !== req.user.id) {
-      await Notification.create({
-        userId: comment.userId,
-        actorId: req.user.id,
-        type: "comment_like",
-        postId,
+    if (created) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "comment_like",
+        targetType: "comment",
+        targetId: commentId,
+        metadata: {
+          route: "/api/posts/:postId/comments/:commentId/like",
+          method: req.method,
+          postId,
+          commentOwnerId: comment.userId,
+        },
       });
+
+      if (comment.userId !== req.user.id) {
+        await Notification.create({
+          userId: comment.userId,
+          actorId: req.user.id,
+          type: "comment_like",
+          postId,
+        });
+      }
     }
 
     const likeCount = await CommentLike.count({ where: { commentId } });
@@ -241,7 +273,23 @@ router.delete("/:postId/comments/:commentId/like", authMiddleware, async (req, r
       return res.status(404).json({ message: "Comment not found." });
     }
 
-    await CommentLike.destroy({ where: { userId: req.user.id, commentId } });
+    const destroyedCount = await CommentLike.destroy({ where: { userId: req.user.id, commentId } });
+
+    if (destroyedCount > 0) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "comment_unlike",
+        targetType: "comment",
+        targetId: commentId,
+        metadata: {
+          route: "/api/posts/:postId/comments/:commentId/like",
+          method: req.method,
+          postId,
+          commentOwnerId: comment.userId,
+        },
+      });
+    }
 
     const likeCount = await CommentLike.count({ where: { commentId } });
     return res.json({ liked: false, likeCount });

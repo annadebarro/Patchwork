@@ -1,6 +1,7 @@
 const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
+const { logUserActionSafe } = require("../services/actionLogger");
 
 const router = express.Router({ mergeParams: true });
 
@@ -19,13 +20,28 @@ router.post("/:postId/like", authMiddleware, async (req, res) => {
       defaults: { userId: req.user.id, postId },
     });
 
-    if (created && post.userId !== req.user.id) {
-      await Notification.create({
-        userId: post.userId,
-        actorId: req.user.id,
-        type: "like",
-        postId,
+    if (created) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "post_like",
+        targetType: "post",
+        targetId: postId,
+        metadata: {
+          route: "/api/posts/:postId/like",
+          method: req.method,
+          postOwnerId: post.userId,
+        },
       });
+
+      if (post.userId !== req.user.id) {
+        await Notification.create({
+          userId: post.userId,
+          actorId: req.user.id,
+          type: "like",
+          postId,
+        });
+      }
     }
 
     const likeCount = await Like.count({ where: { postId } });
@@ -46,7 +62,22 @@ router.delete("/:postId/like", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Post not found." });
     }
 
-    await Like.destroy({ where: { userId: req.user.id, postId } });
+    const destroyedCount = await Like.destroy({ where: { userId: req.user.id, postId } });
+
+    if (destroyedCount > 0) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "post_unlike",
+        targetType: "post",
+        targetId: postId,
+        metadata: {
+          route: "/api/posts/:postId/like",
+          method: req.method,
+          postOwnerId: post.userId,
+        },
+      });
+    }
 
     const likeCount = await Like.count({ where: { postId } });
     return res.json({ liked: false, likeCount });

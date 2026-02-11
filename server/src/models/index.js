@@ -234,6 +234,35 @@ function initModels(sequelize) {
         allowNull: false,
         field: "target_id",
       },
+      targetType: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "target_type",
+      },
+      metadataJson: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: {},
+        field: "metadata_json",
+      },
+      sourceSurface: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "source_surface",
+      },
+      occurredAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "occurred_at",
+      },
+      sessionId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "session_id",
+      },
     },
     {
       tableName: "user_actions",
@@ -245,6 +274,18 @@ function initModels(sequelize) {
         },
         {
           fields: ["action_type"],
+        },
+        {
+          fields: ["user_id", { name: "occurred_at", order: "DESC" }],
+        },
+        {
+          fields: ["action_type", { name: "occurred_at", order: "DESC" }],
+        },
+        {
+          fields: ["target_type", "target_id"],
+        },
+        {
+          fields: ["source_surface", { name: "occurred_at", order: "DESC" }],
         },
       ],
     }

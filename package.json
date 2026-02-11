@@ -2,6 +2,9 @@
   "name": "patchwork",
   "private": true,
   "scripts": {
+    "db:baseline": "npm run db:baseline --prefix server",
+    "db:migrate": "npm run db:migrate --prefix server",
+    "db:migrate:status": "npm run db:migrate:status --prefix server",
     "setup": "npm install --prefix server && npm install --prefix client"
   },
   "dependencies": {}

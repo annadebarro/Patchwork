@@ -2,6 +2,7 @@ const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
 const { optionalAuthMiddleware } = require("../middleware/auth");
+const { logUserActionSafe } = require("../services/actionLogger");
 
 const router = express.Router();
 
@@ -109,6 +110,19 @@ router.post("/:userId", authMiddleware, async (req, res) => {
     });
 
     if (created) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "user_follow",
+        targetType: "user",
+        targetId: userId,
+        metadata: {
+          route: "/api/follows/:userId",
+          method: req.method,
+          followeeId: userId,
+        },
+      });
+
       await Notification.create({
         userId,
         actorId: req.user.id,
@@ -129,9 +143,24 @@ router.delete("/:userId", authMiddleware, async (req, res) => {
   const { userId } = req.params;
 
   try {
-    await Follow.destroy({
+    const destroyedCount = await Follow.destroy({
       where: { followerId: req.user.id, followeeId: userId },
     });
+
+    if (destroyedCount > 0) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: "user_unfollow",
+        targetType: "user",
+        targetId: userId,
+        metadata: {
+          route: "/api/follows/:userId",
+          method: req.method,
+          followeeId: userId,
+        },
+      });
+    }
 
     const followerCount = await Follow.count({ where: { followeeId: userId } });
     return res.json({ following: false, followerCount });
