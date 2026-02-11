@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import PostCard from "../feed/PostCard";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 import QuiltListView from "../quilts/QuiltListView";
@@ -32,14 +32,15 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
 
       try {
         if (isOwnProfile) {
-          const token = localStorage.getItem("token");
           const [postsRes, profileRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/posts/mine`, {
-              headers: { Authorization: `Bearer ${token}` },
+            apiFetch("/posts/mine", {
+              auth: true,
+              surface: REQUEST_SURFACES.PROFILE,
             }),
             user?.username
-              ? fetch(`${API_BASE_URL}/users/${encodeURIComponent(user.username)}`, {
-                  headers: { Authorization: `Bearer ${token}` },
+              ? apiFetch(`/users/${encodeURIComponent(user.username)}`, {
+                  auth: true,
+                  surface: REQUEST_SURFACES.PROFILE,
                 })
               : null,
           ]);
@@ -61,10 +62,10 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
           }
         } else if (username) {
           const token = localStorage.getItem("token");
-          const headers = {};
-          if (token) headers.Authorization = `Bearer ${token}`;
-
-          const res = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(username)}`, { headers });
+          const res = await apiFetch(`/users/${encodeURIComponent(username)}`, {
+            token,
+            surface: REQUEST_SURFACES.PROFILE,
+          });
           const data = await parseApiResponse(res);
           if (!res.ok) {
             if (isMounted) setPostsError(data?.message || "User not found.");
@@ -96,9 +97,10 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
     setFollowBusy(true);
     const method = isFollowing ? "DELETE" : "POST";
     try {
-      const res = await fetch(`${API_BASE_URL}/follows/${profileUser.id}`, {
+      const res = await apiFetch(`/follows/${profileUser.id}`, {
         method,
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.PROFILE,
       });
       const data = await parseApiResponse(res);
       if (res.ok) {

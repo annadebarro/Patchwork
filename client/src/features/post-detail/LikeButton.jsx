@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 
 function LikeButton({ postId, initialLiked, initialCount, onLikeChange }) {
   const [liked, setLiked] = useState(Boolean(initialLiked));
@@ -14,9 +14,10 @@ function LikeButton({ postId, initialLiked, initialCount, onLikeChange }) {
     setBusy(true);
     const method = liked ? "DELETE" : "POST";
     try {
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}/like`, {
+      const res = await apiFetch(`/posts/${postId}/like`, {
         method,
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
       });
       const data = await parseApiResponse(res);
       if (res.ok) {

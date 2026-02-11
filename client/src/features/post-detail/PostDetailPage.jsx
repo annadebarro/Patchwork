@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 import LikeButton from "./LikeButton";
@@ -11,8 +11,16 @@ function formatPrice(priceCents) {
   return `$${(priceCents / 100).toFixed(2)}`;
 }
 
+function normalizeRankPosition(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.trunc(parsed);
+  return normalized > 0 ? normalized : null;
+}
+
 function PostDetailPage({ currentUser }) {
   const { postId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,6 +31,13 @@ function PostDetailPage({ currentUser }) {
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [soldBusy, setSoldBusy] = useState(false);
+  const feedTelemetry = location.state?.feedTelemetry;
+  const patchTelemetryContext = {
+    feedType: typeof feedTelemetry?.feedType === "string" ? feedTelemetry.feedType : null,
+    rankPosition: normalizeRankPosition(feedTelemetry?.rankPosition),
+    algorithm: typeof feedTelemetry?.algorithm === "string" ? feedTelemetry.algorithm : null,
+    requestId: typeof feedTelemetry?.requestId === "string" ? feedTelemetry.requestId : null,
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -237,7 +252,7 @@ function PostDetailPage({ currentUser }) {
                 initialCount={post.likeCount}
                 onLikeChange={handleLikeChange}
               />
-              <PatchButton postId={post.id} />
+              <PatchButton postId={post.id} telemetryContext={patchTelemetryContext} />
             </div>
 
             {isOwner && !editing && (

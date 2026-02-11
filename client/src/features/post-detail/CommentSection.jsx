@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import CommentLikeButton from "./CommentLikeButton";
 
 function CommentSection({ postId, postOwnerId }) {
@@ -25,10 +25,11 @@ function CommentSection({ postId, postOwnerId }) {
     async function fetchComments() {
       setLoading(true);
       try {
-        const headers = {};
         const token = localStorage.getItem("token");
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`, { headers });
+        const res = await apiFetch(`/posts/${postId}/comments`, {
+          surface: REQUEST_SURFACES.POST_DETAIL,
+          token,
+        });
         const data = await parseApiResponse(res);
         if (res.ok && isMounted) {
           setComments(Array.isArray(data?.comments) ? data.comments : []);
@@ -60,9 +61,10 @@ function CommentSection({ postId, postOwnerId }) {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments/${commentId}`, {
+      const res = await apiFetch(`/posts/${postId}/comments/${commentId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
       });
       if (res.ok) {
         if (parentId) {
@@ -97,11 +99,12 @@ function CommentSection({ postId, postOwnerId }) {
         payload.parentId = replyingTo.id;
       }
 
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}/comments`, {
+      const res = await apiFetch(`/posts/${postId}/comments`, {
         method: "POST",
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });

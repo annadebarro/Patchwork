@@ -2,7 +2,12 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { extractSessionId, logUserActionSafe, normalizeSurface } = require("./actionLogger");
+const {
+  buildRecommendationActionMetadata,
+  extractSessionId,
+  logUserActionSafe,
+  normalizeSurface,
+} = require("./actionLogger");
 
 const VALID_UUID = "e27c0be0-cf14-4ef3-b4f8-4e84cb83a2b0";
 
@@ -18,6 +23,34 @@ test("extractSessionId returns UUID or null", () => {
   assert.equal(extractSessionId({ headers: { "x-pw-session-id": VALID_UUID } }), VALID_UUID);
   assert.equal(extractSessionId({ headers: { "x-pw-session-id": "bad-id" } }), null);
   assert.equal(extractSessionId({ headers: {} }), null);
+});
+
+test("buildRecommendationActionMetadata standardizes recommendation fields", () => {
+  const metadata = buildRecommendationActionMetadata({
+    req: {
+      headers: {
+        "x-pw-surface": "social_feed",
+        "x-pw-session-id": VALID_UUID,
+      },
+    },
+    metadata: {
+      feedType: "market",
+      rankPosition: "3",
+      algorithm: "chronological_fallback",
+      requestId: "d4623f5b-1111-4d5f-9e22-0ec52b73a3f8",
+      postId: "22222222-2222-4222-8222-222222222222",
+      dwellMs: 1200,
+    },
+  });
+
+  assert.equal(metadata.surface, "social_feed");
+  assert.equal(metadata.sessionId, VALID_UUID);
+  assert.equal(metadata.feedType, "market");
+  assert.equal(metadata.rankPosition, 3);
+  assert.equal(metadata.algorithm, "chronological_fallback");
+  assert.equal(metadata.requestId, "d4623f5b-1111-4d5f-9e22-0ec52b73a3f8");
+  assert.equal(metadata.postId, "22222222-2222-4222-8222-222222222222");
+  assert.equal(metadata.dwellMs, 1200);
 });
 
 test("logUserActionSafe writes a normalized event payload", async () => {

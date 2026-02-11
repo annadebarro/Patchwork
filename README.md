@@ -117,6 +117,8 @@ npm run db:migrate --prefix server
   - `x-pw-session-id`: UUID session identifier
 - If headers are missing or invalid, values safely fall back to `unknown` (surface) and `null` (session id).
 - Logging is best-effort: if event logging fails, the user-facing mutation still completes normally.
+- Canonical KPI semantics spec for recommender/testing work:
+  - `/Users/jacklund/Documents/CS/CS422/Patchwork/documents/recommendation-kpi-spec.md`
 
 ## Project Structure
 

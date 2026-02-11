@@ -1,12 +1,28 @@
 import { useEffect, useState } from "react";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import {
+  API_BASE_URL,
+  buildTelemetryHeaders,
+  parseApiResponse,
+} from "../../shared/api/http";
 
-function QuiltPickerModal({ isOpen, onClose, postId }) {
+function QuiltPickerModal({ isOpen, onClose, postId, telemetryContext }) {
   const [quilts, setQuilts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  function buildPatchPayload() {
+    return {
+      postId,
+      feedType: typeof telemetryContext?.feedType === "string" ? telemetryContext.feedType : null,
+      rankPosition: Number.isFinite(telemetryContext?.rankPosition)
+        ? Math.trunc(telemetryContext.rankPosition)
+        : null,
+      algorithm: typeof telemetryContext?.algorithm === "string" ? telemetryContext.algorithm : null,
+      requestId: typeof telemetryContext?.requestId === "string" ? telemetryContext.requestId : null,
+    };
+  }
 
   useEffect(() => {
     if (!isOpen) {
@@ -48,8 +64,9 @@ function QuiltPickerModal({ isOpen, onClose, postId }) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          ...buildTelemetryHeaders("post_detail"),
         },
-        body: JSON.stringify({ postId }),
+        body: JSON.stringify(buildPatchPayload()),
       });
       if (res.ok) {
         setMessage("Saved!");
@@ -91,8 +108,9 @@ function QuiltPickerModal({ isOpen, onClose, postId }) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          ...buildTelemetryHeaders("post_detail"),
         },
-        body: JSON.stringify({ postId }),
+        body: JSON.stringify(buildPatchPayload()),
       });
 
       if (patchRes.ok) {

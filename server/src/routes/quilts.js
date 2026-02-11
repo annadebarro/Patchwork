@@ -3,6 +3,11 @@ const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
 const { optionalAuthMiddleware } = require("../middleware/auth");
 const { fn, col } = require("sequelize");
+const {
+  ACTION_TYPES,
+  buildRecommendationActionMetadata,
+  logUserActionSafe,
+} = require("../services/actionLogger");
 
 const router = express.Router();
 
@@ -175,7 +180,13 @@ router.delete("/:quiltId", authMiddleware, async (req, res) => {
 router.post("/:quiltId/patches", authMiddleware, async (req, res) => {
   const { Quilt, Patch, Post } = getModels();
   const { quiltId } = req.params;
-  const { postId } = req.body || {};
+  const {
+    postId,
+    feedType,
+    rankPosition,
+    algorithm,
+    requestId,
+  } = req.body || {};
 
   if (!postId) {
     return res.status(400).json({ message: "postId is required." });
@@ -201,14 +212,36 @@ router.post("/:quiltId/patches", authMiddleware, async (req, res) => {
       defaults: { quiltId, postId, userId: req.user.id },
     });
 
-    if (created && post.userId !== req.user.id) {
-      const { Notification } = getModels();
-      await Notification.create({
-        userId: post.userId,
-        actorId: req.user.id,
-        type: "patch",
-        postId,
+    if (created) {
+      await logUserActionSafe({
+        req,
+        userId: req.user.id,
+        actionType: ACTION_TYPES.POST_PATCH_SAVE,
+        targetType: "post",
+        targetId: postId,
+        metadata: buildRecommendationActionMetadata({
+          req,
+          postId,
+          metadata: {
+            feedType,
+            rankPosition,
+            algorithm,
+            requestId,
+            postId,
+            quiltId,
+          },
+        }),
       });
+
+      if (post.userId !== req.user.id) {
+        const { Notification } = getModels();
+        await Notification.create({
+          userId: post.userId,
+          actorId: req.user.id,
+          type: "patch",
+          postId,
+        });
+      }
     }
 
     return res.status(201).json({ patch });
