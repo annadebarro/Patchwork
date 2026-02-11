@@ -356,6 +356,44 @@ function initModels(sequelize) {
         allowNull: true,
         field: "price_cents",
       },
+      category: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      subcategory: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      brand: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "",
+      },
+      styleTags: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+        field: "style_tags",
+      },
+      colorTags: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+        field: "color_tags",
+      },
+      condition: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      sizeLabel: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "size_label",
+      },
       isPublic: {
         type: DataTypes.BOOLEAN,
         allowNull: false,

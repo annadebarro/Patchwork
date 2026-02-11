@@ -1,5 +1,19 @@
-import { useEffect, useState } from "react";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { useEffect, useMemo, useState } from "react";
+import {
+  apiFetch,
+  parseApiResponse,
+  REQUEST_SURFACES,
+} from "../../shared/api/http";
+import {
+  addTagValue,
+  fetchPostMetadataOptions,
+  getFallbackPostMetadataOptions,
+  MAX_COLOR_TAGS,
+  MAX_STYLE_TAGS,
+  removeTagValue,
+  toDisplayLabel,
+  UNKNOWN,
+} from "../../shared/posts/postMetadata";
 
 function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [type, setType] = useState("regular");
@@ -10,6 +24,22 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [metadataOptions, setMetadataOptions] = useState(() => getFallbackPostMetadataOptions());
+  const [category, setCategory] = useState(UNKNOWN);
+  const [subcategory, setSubcategory] = useState(UNKNOWN);
+  const [brand, setBrand] = useState("");
+  const [condition, setCondition] = useState(UNKNOWN);
+  const [sizeLabel, setSizeLabel] = useState(UNKNOWN);
+  const [styleTags, setStyleTags] = useState([]);
+  const [colorTags, setColorTags] = useState([]);
+  const [styleTagInput, setStyleTagInput] = useState("");
+  const [colorTagInput, setColorTagInput] = useState("");
+
+  const subcategoryOptions = useMemo(() => {
+    const options = metadataOptions?.subcategoriesByCategory?.[category];
+    return Array.isArray(options) && options.length > 0 ? options : [UNKNOWN];
+  }, [category, metadataOptions]);
+
   useEffect(() => {
     if (!isOpen) {
       setType("regular");
@@ -18,7 +48,32 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setImageFile(null);
       setPreviewUrl("");
       setError("");
+      setCategory(UNKNOWN);
+      setSubcategory(UNKNOWN);
+      setBrand("");
+      setCondition(UNKNOWN);
+      setSizeLabel(UNKNOWN);
+      setStyleTags([]);
+      setColorTags([]);
+      setStyleTagInput("");
+      setColorTagInput("");
+      return;
     }
+
+    let ignore = false;
+    fetchPostMetadataOptions()
+      .then((options) => {
+        if (!ignore && options) {
+          setMetadataOptions(options);
+        }
+      })
+      .catch(() => {
+        // Keep fallback metadata options when options API fails.
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -26,6 +81,12 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (!subcategoryOptions.includes(subcategory)) {
+      setSubcategory(UNKNOWN);
+    }
+  }, [subcategory, subcategoryOptions]);
 
   function handleFileChange(event) {
     const file = event.target.files?.[0] || null;
@@ -38,6 +99,24 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
     } else {
       setImageFile(null);
       setPreviewUrl("");
+    }
+  }
+
+  function addStyleTag(rawTag) {
+    setStyleTags((prev) => addTagValue(prev, rawTag, MAX_STYLE_TAGS));
+  }
+
+  function addColorTag(rawTag) {
+    setColorTags((prev) => addTagValue(prev, rawTag, MAX_COLOR_TAGS));
+  }
+
+  function handleTagKeyDown(event, addFn, clearFn) {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      const rawValue = event.currentTarget.value;
+      if (!rawValue.trim()) return;
+      addFn(rawValue);
+      clearFn("");
     }
   }
 
@@ -70,9 +149,10 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       formData.append("file", imageFile);
       formData.append("folder", "posts");
 
-      const uploadRes = await fetch(`${API_BASE_URL}/uploads`, {
+      const uploadRes = await apiFetch("/uploads", {
         method: "POST",
         body: formData,
+        surface: REQUEST_SURFACES.SOCIAL_FEED,
       });
       const uploadData = await parseApiResponse(uploadRes);
       if (!uploadRes.ok) {
@@ -91,19 +171,27 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
         type,
         caption: caption.trim(),
         imageUrl,
+        category,
+        subcategory,
+        brand,
+        styleTags,
+        colorTags,
+        condition,
+        sizeLabel,
       };
 
       if (type === "market") {
         payload.priceCents = Math.round(Number(price) * 100);
       }
 
-      const res = await fetch(`${API_BASE_URL}/posts`, {
+      const res = await apiFetch("/posts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
+        auth: true,
+        surface: REQUEST_SURFACES.SOCIAL_FEED,
       });
 
       const data = await parseApiResponse(res);
@@ -170,6 +258,173 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
               />
             </label>
           )}
+
+          <div className="post-metadata-grid">
+            <label>
+              Category
+              <select value={category} onChange={(event) => setCategory(event.target.value)}>
+                {metadataOptions.categories.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {toDisplayLabel(entry)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Subcategory
+              <select value={subcategory} onChange={(event) => setSubcategory(event.target.value)}>
+                {subcategoryOptions.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {toDisplayLabel(entry)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Condition
+              <select value={condition} onChange={(event) => setCondition(event.target.value)}>
+                {metadataOptions.conditions.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {toDisplayLabel(entry)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Size
+              <select value={sizeLabel} onChange={(event) => setSizeLabel(event.target.value)}>
+                {metadataOptions.sizeLabels.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {toDisplayLabel(entry)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Brand
+            <input
+              type="text"
+              value={brand}
+              onChange={(event) => setBrand(event.target.value)}
+              placeholder="Brand (optional)"
+              maxLength={50}
+              list="create-post-brand-options"
+            />
+            <datalist id="create-post-brand-options">
+              {metadataOptions.suggestedBrands.map((entry) => (
+                <option key={entry} value={entry} />
+              ))}
+            </datalist>
+          </label>
+
+          <div className="post-tag-editor">
+            <span>Style tags (optional)</span>
+            <div className="post-tag-row">
+              <input
+                type="text"
+                value={styleTagInput}
+                onChange={(event) => setStyleTagInput(event.target.value)}
+                onKeyDown={(event) => handleTagKeyDown(event, addStyleTag, setStyleTagInput)}
+                placeholder="Add style tag"
+              />
+              <button
+                type="button"
+                className="size-add"
+                onClick={() => {
+                  addStyleTag(styleTagInput);
+                  setStyleTagInput("");
+                }}
+              >
+                Add
+              </button>
+            </div>
+            <div className="post-tag-suggestions">
+              {metadataOptions.suggestedStyleTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`brand-chip ${styleTags.includes(tag) ? "selected" : ""}`}
+                  onClick={() => addStyleTag(tag)}
+                >
+                  {toDisplayLabel(tag)}
+                </button>
+              ))}
+            </div>
+            {styleTags.length > 0 ? (
+              <div className="post-tag-list">
+                {styleTags.map((tag) => (
+                  <span key={tag} className="post-tag-chip">
+                    {toDisplayLabel(tag)}
+                    <button
+                      type="button"
+                      onClick={() => setStyleTags((prev) => removeTagValue(prev, tag))}
+                    >
+                      remove
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="post-tag-empty">No style tags selected.</p>
+            )}
+          </div>
+
+          <div className="post-tag-editor">
+            <span>Color tags (optional)</span>
+            <div className="post-tag-row">
+              <input
+                type="text"
+                value={colorTagInput}
+                onChange={(event) => setColorTagInput(event.target.value)}
+                onKeyDown={(event) => handleTagKeyDown(event, addColorTag, setColorTagInput)}
+                placeholder="Add color tag"
+              />
+              <button
+                type="button"
+                className="size-add"
+                onClick={() => {
+                  addColorTag(colorTagInput);
+                  setColorTagInput("");
+                }}
+              >
+                Add
+              </button>
+            </div>
+            <div className="post-tag-suggestions">
+              {metadataOptions.suggestedColorTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`brand-chip ${colorTags.includes(tag) ? "selected" : ""}`}
+                  onClick={() => addColorTag(tag)}
+                >
+                  {toDisplayLabel(tag)}
+                </button>
+              ))}
+            </div>
+            {colorTags.length > 0 ? (
+              <div className="post-tag-list">
+                {colorTags.map((tag) => (
+                  <span key={tag} className="post-tag-chip">
+                    {toDisplayLabel(tag)}
+                    <button
+                      type="button"
+                      onClick={() => setColorTags((prev) => removeTagValue(prev, tag))}
+                    >
+                      remove
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="post-tag-empty">No color tags selected.</p>
+            )}
+          </div>
 
           <label>
             Image
