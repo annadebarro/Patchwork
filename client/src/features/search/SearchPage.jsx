@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import PostCard from "../feed/PostCard";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 
@@ -217,8 +217,9 @@ function SearchPage() {
       params.set("q", query);
       params.set("tab", "overall");
       params.set("sectionLimit", String(SEARCH_SECTION_LIMIT));
-      const res = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await apiFetch(`/search?${params.toString()}`, {
+        auth: true,
+        surface: REQUEST_SURFACES.SEARCH_RESULTS,
         signal: controller.signal,
       });
       const data = await parseApiResponse(res);
@@ -308,8 +309,9 @@ function SearchPage() {
       params.set("tab", tab);
       params.set("offset", String(offset));
       params.set("limit", String(limit));
-      const res = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await apiFetch(`/search?${params.toString()}`, {
+        auth: true,
+        surface: REQUEST_SURFACES.SEARCH_RESULTS,
         signal: controller.signal,
       });
       const data = await parseApiResponse(res);

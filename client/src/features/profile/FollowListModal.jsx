@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 
 function FollowListModal({ userId, type, currentUserId, onClose, onCountChange }) {
@@ -15,11 +15,12 @@ function FollowListModal({ userId, type, currentUserId, onClose, onCountChange }
     async function fetchList() {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const headers = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
 
       try {
-        const res = await fetch(`${API_BASE_URL}/follows/${userId}/${type}`, { headers });
+        const res = await apiFetch(`/follows/${userId}/${type}`, {
+          token,
+          surface: REQUEST_SURFACES.PROFILE,
+        });
         const data = await parseApiResponse(res);
         if (res.ok && isMounted) {
           setUsers(Array.isArray(data?.users) ? data.users : []);
@@ -41,9 +42,10 @@ function FollowListModal({ userId, type, currentUserId, onClose, onCountChange }
 
     const method = currentlyFollowing ? "DELETE" : "POST";
     try {
-      const res = await fetch(`${API_BASE_URL}/follows/${targetUserId}`, {
+      const res = await apiFetch(`/follows/${targetUserId}`, {
         method,
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.PROFILE,
       });
       if (res.ok) {
         setUsers((prev) =>

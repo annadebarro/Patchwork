@@ -1,7 +1,7 @@
 import { useState } from "react";
 import QuiltPickerModal from "../quilts/QuiltPickerModal";
 
-function PatchButton({ postId }) {
+function PatchButton({ postId, telemetryContext }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -21,6 +21,7 @@ function PatchButton({ postId }) {
         isOpen={open}
         onClose={() => setOpen(false)}
         postId={postId}
+        telemetryContext={telemetryContext}
       />
     </>
   );

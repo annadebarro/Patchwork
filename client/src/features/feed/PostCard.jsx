@@ -1,27 +1,127 @@
+import { useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+
+const VISIBILITY_THRESHOLD = 0.5;
 
 function formatPrice(priceCents) {
   if (!Number.isFinite(priceCents)) return "";
   return `$${(priceCents / 100).toFixed(2)}`;
 }
 
-function PostCard({ post, imageOnly }) {
+function PostCard({
+  post,
+  imageOnly,
+  rankPosition = null,
+  feedContext = null,
+  onFeedImpression,
+  onFeedDwell,
+  onFeedClick,
+}) {
   const navigate = useNavigate();
+  const cardRef = useRef(null);
+  const hasLoggedImpressionRef = useRef(false);
+  const visibleSinceRef = useRef(null);
   const isMarket = post.type === "market";
   const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
   const caption = typeof post.caption === "string" ? post.caption : "";
   const authorUsername = post.author?.username;
   const isSold = Boolean(post.isSold);
 
+  const emitDwell = useCallback((now = Date.now()) => {
+    if (visibleSinceRef.current === null || typeof onFeedDwell !== "function") {
+      return;
+    }
+
+    const dwellMs = now - visibleSinceRef.current;
+    visibleSinceRef.current = null;
+
+    if (dwellMs > 0) {
+      onFeedDwell({
+        postId: post.id,
+        rankPosition,
+        dwellMs,
+        occurredAt: new Date(now),
+      });
+    }
+  }, [onFeedDwell, post.id, rankPosition]);
+
+  useEffect(() => {
+    hasLoggedImpressionRef.current = false;
+    visibleSinceRef.current = null;
+  }, [feedContext?.requestId, post.id]);
+
+  useEffect(() => {
+    if (imageOnly) return undefined;
+
+    const element = cardRef.current;
+    if (!element || typeof IntersectionObserver !== "function") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return;
+
+        if (entry.isIntersecting && entry.intersectionRatio >= VISIBILITY_THRESHOLD) {
+          if (!hasLoggedImpressionRef.current && typeof onFeedImpression === "function") {
+            hasLoggedImpressionRef.current = true;
+            onFeedImpression({
+              postId: post.id,
+              rankPosition,
+              occurredAt: new Date(),
+            });
+          }
+
+          if (visibleSinceRef.current === null) {
+            visibleSinceRef.current = Date.now();
+          }
+          return;
+        }
+
+        emitDwell(Date.now());
+      },
+      { threshold: [VISIBILITY_THRESHOLD] }
+    );
+
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      emitDwell(Date.now());
+    };
+  }, [emitDwell, imageOnly, onFeedImpression, post.id, rankPosition]);
+
+  function openPost() {
+    if (typeof onFeedClick === "function") {
+      onFeedClick({
+        postId: post.id,
+        rankPosition,
+        occurredAt: new Date(),
+      });
+    }
+
+    navigate(`/post/${post.id}`, {
+      state: {
+        feedTelemetry: {
+          postId: post.id,
+          feedType: typeof feedContext?.feedType === "string" ? feedContext.feedType : null,
+          rankPosition,
+          algorithm: typeof feedContext?.algorithm === "string" ? feedContext.algorithm : null,
+          requestId: typeof feedContext?.requestId === "string" ? feedContext.requestId : null,
+        },
+      },
+    });
+  }
+
   if (imageOnly) {
     return (
       <div
+        ref={cardRef}
         className="post-card post-card--image-only"
-        onClick={() => navigate(`/post/${post.id}`)}
+        onClick={openPost}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
-          if (e.key === "Enter") navigate(`/post/${post.id}`);
+          if (e.key === "Enter") openPost();
         }}
       >
         <img src={post.imageUrl} alt="Post" />
@@ -31,12 +131,13 @@ function PostCard({ post, imageOnly }) {
 
   return (
     <div
+      ref={cardRef}
       className={`post-card post-card--clickable${isSold ? " post-card--sold" : ""}`}
-      onClick={() => navigate(`/post/${post.id}`)}
+      onClick={openPost}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === "Enter") navigate(`/post/${post.id}`);
+        if (e.key === "Enter") openPost();
       }}
     >
       <img src={post.imageUrl} alt={caption || "Post"} />

@@ -1102,6 +1102,85 @@ button:disabled {
   background: #fff;
 }
 
+.post-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.post-tag-editor {
+  border: 2px dashed var(--denim-wash);
+  background: #fff;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.post-tag-editor > span {
+  font-weight: 700;
+  color: var(--denim-dark);
+}
+
+.post-tag-row {
+  display: flex;
+  gap: 8px;
+}
+
+.post-tag-row input {
+  flex: 1;
+}
+
+.post-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.post-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.post-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--denim-dark);
+  background: var(--cream);
+  color: var(--denim-dark);
+  font-size: 0.82rem;
+}
+
+.post-tag-chip button {
+  border: none;
+  background: transparent;
+  color: var(--denim-dark);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.post-tag-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--denim-mid);
+}
+
+@media (max-width: 720px) {
+  .post-metadata-grid,
+  .post-detail-metadata-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .post-tag-row {
+    flex-direction: column;
+  }
+}
+
 .create-post-preview {
   border: 2px dashed var(--denim-dark);
   padding: 8px;
@@ -1943,6 +2022,52 @@ button:disabled {
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--denim-dark);
+}
+
+.post-detail-metadata {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 2px solid var(--denim-wash);
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.post-detail-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.post-detail-metadata-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--denim-dark);
+  font-size: 0.9rem;
+}
+
+.post-detail-metadata-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--denim-mid);
+}
+
+.post-detail-tag-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.post-detail-tag {
+  border: 1px solid var(--denim-dark);
+  background: #fff;
+  color: var(--denim-dark);
+  font-size: 0.78rem;
+  padding: 3px 7px;
 }
 
 .post-detail-actions {

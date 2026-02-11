@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
+import {
+  addTagValue,
+  fetchPostMetadataOptions,
+  getFallbackPostMetadataOptions,
+  MAX_COLOR_TAGS,
+  MAX_STYLE_TAGS,
+  removeTagValue,
+  toDisplayLabel,
+  UNKNOWN,
+} from "../../shared/posts/postMetadata";
 import LikeButton from "./LikeButton";
 import PatchButton from "./PatchButton";
 import CommentSection from "./CommentSection";
@@ -11,8 +21,21 @@ function formatPrice(priceCents) {
   return `$${(priceCents / 100).toFixed(2)}`;
 }
 
+function normalizeRankPosition(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.trunc(parsed);
+  return normalized > 0 ? normalized : null;
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry) => typeof entry === "string" && entry.trim());
+}
+
 function PostDetailPage({ currentUser }) {
   const { postId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -21,8 +44,57 @@ function PostDetailPage({ currentUser }) {
   const [editCaption, setEditCaption] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [soldBusy, setSoldBusy] = useState(false);
+
+  const [metadataOptions, setMetadataOptions] = useState(() => getFallbackPostMetadataOptions());
+  const [editCategory, setEditCategory] = useState(UNKNOWN);
+  const [editSubcategory, setEditSubcategory] = useState(UNKNOWN);
+  const [editBrand, setEditBrand] = useState("");
+  const [editCondition, setEditCondition] = useState(UNKNOWN);
+  const [editSizeLabel, setEditSizeLabel] = useState(UNKNOWN);
+  const [editStyleTags, setEditStyleTags] = useState([]);
+  const [editColorTags, setEditColorTags] = useState([]);
+  const [editStyleTagInput, setEditStyleTagInput] = useState("");
+  const [editColorTagInput, setEditColorTagInput] = useState("");
+
+  const feedTelemetry = location.state?.feedTelemetry;
+  const patchTelemetryContext = {
+    feedType: typeof feedTelemetry?.feedType === "string" ? feedTelemetry.feedType : null,
+    rankPosition: normalizeRankPosition(feedTelemetry?.rankPosition),
+    algorithm: typeof feedTelemetry?.algorithm === "string" ? feedTelemetry.algorithm : null,
+    requestId: typeof feedTelemetry?.requestId === "string" ? feedTelemetry.requestId : null,
+  };
+
+  const editSubcategoryOptions = useMemo(() => {
+    const options = metadataOptions?.subcategoriesByCategory?.[editCategory];
+    return Array.isArray(options) && options.length > 0 ? options : [UNKNOWN];
+  }, [editCategory, metadataOptions]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    fetchPostMetadataOptions()
+      .then((options) => {
+        if (!ignore && options) {
+          setMetadataOptions(options);
+        }
+      })
+      .catch(() => {
+        // Keep fallback metadata options when options API fails.
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editSubcategoryOptions.includes(editSubcategory)) {
+      setEditSubcategory(UNKNOWN);
+    }
+  }, [editSubcategory, editSubcategoryOptions]);
 
   useEffect(() => {
     let isMounted = true;
@@ -32,10 +104,12 @@ function PostDetailPage({ currentUser }) {
       setError("");
       try {
         const token = localStorage.getItem("token");
-        const headers = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
 
-        const res = await fetch(`${API_BASE_URL}/posts/${postId}`, { headers });
+        const res = await apiFetch(`/posts/${postId}`, {
+          method: "GET",
+          auth: Boolean(token),
+          surface: REQUEST_SURFACES.POST_DETAIL,
+        });
         const data = await parseApiResponse(res);
         if (!res.ok) {
           if (isMounted) setError(data?.message || "Failed to load post.");
@@ -50,39 +124,75 @@ function PostDetailPage({ currentUser }) {
     }
 
     fetchPost();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [postId]);
 
   const handleLikeChange = useCallback((liked, likeCount) => {
-    setPost((prev) => prev ? { ...prev, userLiked: liked, likeCount } : prev);
+    setPost((prev) => (prev ? { ...prev, userLiked: liked, likeCount } : prev));
   }, []);
 
   const isOwner = currentUser && post && currentUser.id === post.userId;
 
+  function addEditStyleTag(rawTag) {
+    setEditStyleTags((prev) => addTagValue(prev, rawTag, MAX_STYLE_TAGS));
+  }
+
+  function addEditColorTag(rawTag) {
+    setEditColorTags((prev) => addTagValue(prev, rawTag, MAX_COLOR_TAGS));
+  }
+
+  function handleTagKeyDown(event, addFn, clearFn) {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      const rawValue = event.currentTarget.value;
+      if (!rawValue.trim()) return;
+      addFn(rawValue);
+      clearFn("");
+    }
+  }
+
   async function saveEdit() {
     const token = localStorage.getItem("token");
     if (!token) return;
+
     setEditSaving(true);
+    setEditError("");
     try {
-      const payload = { caption: editCaption };
-      if (post.type === "market" && editPrice !== "") {
-        payload.priceCents = Math.round(Number(editPrice) * 100);
+      const payload = {
+        caption: editCaption,
+        category: editCategory,
+        subcategory: editSubcategory,
+        brand: editBrand,
+        styleTags: editStyleTags,
+        colorTags: editColorTags,
+        condition: editCondition,
+        sizeLabel: editSizeLabel,
+      };
+
+      if (post.type === "market") {
+        payload.priceCents = editPrice === "" ? null : Math.round(Number(editPrice) * 100);
       }
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+
+      const res = await apiFetch(`/posts/${postId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
       });
       const data = await parseApiResponse(res);
       if (res.ok) {
         setPost((prev) => ({ ...prev, ...data.post }));
         setEditing(false);
+      } else if (data?.message) {
+        setEditError(data.message);
       }
     } catch {
-      // silent
+      setEditError("Network error while saving post edits.");
     } finally {
       setEditSaving(false);
     }
@@ -91,10 +201,12 @@ function PostDetailPage({ currentUser }) {
   async function deletePost() {
     const token = localStorage.getItem("token");
     if (!token) return;
+
     try {
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+      const res = await apiFetch(`/posts/${postId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
       });
       if (res.ok) {
         navigate(-1);
@@ -107,11 +219,13 @@ function PostDetailPage({ currentUser }) {
   async function toggleSold() {
     const token = localStorage.getItem("token");
     if (!token || soldBusy) return;
+
     setSoldBusy(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/posts/${postId}/sold`, {
+      const res = await apiFetch(`/posts/${postId}/sold`, {
         method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
+        auth: true,
+        surface: REQUEST_SURFACES.POST_DETAIL,
       });
       const data = await parseApiResponse(res);
       if (res.ok) {
@@ -150,14 +264,13 @@ function PostDetailPage({ currentUser }) {
       })
     : "";
 
+  const styleTags = normalizeTags(post.styleTags);
+  const colorTags = normalizeTags(post.colorTags);
+
   return (
     <div className="feed-content">
       <div className="post-detail">
-        <button
-          className="back-button"
-          type="button"
-          onClick={() => navigate(-1)}
-        >
+        <button className="back-button" type="button" onClick={() => navigate(-1)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
@@ -172,10 +285,7 @@ function PostDetailPage({ currentUser }) {
 
           <div className="post-detail-body">
             <div className="post-detail-author-row">
-              <ProfilePatch
-                name={post.author?.name}
-                imageUrl={post.author?.profilePicture}
-              />
+              <ProfilePatch name={post.author?.name} imageUrl={post.author?.profilePicture} />
               <div className="post-detail-author-info">
                 <button
                   type="button"
@@ -197,6 +307,7 @@ function PostDetailPage({ currentUser }) {
                   rows={3}
                   maxLength={2000}
                 />
+
                 {isMarket && (
                   <label className="post-edit-price-label">
                     Price (USD)
@@ -210,23 +321,251 @@ function PostDetailPage({ currentUser }) {
                     />
                   </label>
                 )}
+
+                <div className="post-metadata-grid">
+                  <label>
+                    Category
+                    <select value={editCategory} onChange={(event) => setEditCategory(event.target.value)}>
+                      {metadataOptions.categories.map((entry) => (
+                        <option key={entry} value={entry}>
+                          {toDisplayLabel(entry)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Subcategory
+                    <select
+                      value={editSubcategory}
+                      onChange={(event) => setEditSubcategory(event.target.value)}
+                    >
+                      {editSubcategoryOptions.map((entry) => (
+                        <option key={entry} value={entry}>
+                          {toDisplayLabel(entry)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Condition
+                    <select value={editCondition} onChange={(event) => setEditCondition(event.target.value)}>
+                      {metadataOptions.conditions.map((entry) => (
+                        <option key={entry} value={entry}>
+                          {toDisplayLabel(entry)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Size
+                    <select value={editSizeLabel} onChange={(event) => setEditSizeLabel(event.target.value)}>
+                      {metadataOptions.sizeLabels.map((entry) => (
+                        <option key={entry} value={entry}>
+                          {toDisplayLabel(entry)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="post-edit-price-label">
+                  Brand
+                  <input
+                    type="text"
+                    value={editBrand}
+                    onChange={(event) => setEditBrand(event.target.value)}
+                    className="quilt-edit-input"
+                    maxLength={50}
+                    list="edit-post-brand-options"
+                  />
+                  <datalist id="edit-post-brand-options">
+                    {metadataOptions.suggestedBrands.map((entry) => (
+                      <option key={entry} value={entry} />
+                    ))}
+                  </datalist>
+                </label>
+
+                <div className="post-tag-editor">
+                  <span>Style tags</span>
+                  <div className="post-tag-row">
+                    <input
+                      type="text"
+                      value={editStyleTagInput}
+                      onChange={(event) => setEditStyleTagInput(event.target.value)}
+                      onKeyDown={(event) => handleTagKeyDown(event, addEditStyleTag, setEditStyleTagInput)}
+                      placeholder="Add style tag"
+                    />
+                    <button
+                      type="button"
+                      className="size-add"
+                      onClick={() => {
+                        addEditStyleTag(editStyleTagInput);
+                        setEditStyleTagInput("");
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="post-tag-suggestions">
+                    {metadataOptions.suggestedStyleTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className={`brand-chip ${editStyleTags.includes(tag) ? "selected" : ""}`}
+                        onClick={() => addEditStyleTag(tag)}
+                      >
+                        {toDisplayLabel(tag)}
+                      </button>
+                    ))}
+                  </div>
+                  {editStyleTags.length > 0 ? (
+                    <div className="post-tag-list">
+                      {editStyleTags.map((tag) => (
+                        <span key={tag} className="post-tag-chip">
+                          {toDisplayLabel(tag)}
+                          <button
+                            type="button"
+                            onClick={() => setEditStyleTags((prev) => removeTagValue(prev, tag))}
+                          >
+                            remove
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="post-tag-empty">No style tags selected.</p>
+                  )}
+                </div>
+
+                <div className="post-tag-editor">
+                  <span>Color tags</span>
+                  <div className="post-tag-row">
+                    <input
+                      type="text"
+                      value={editColorTagInput}
+                      onChange={(event) => setEditColorTagInput(event.target.value)}
+                      onKeyDown={(event) => handleTagKeyDown(event, addEditColorTag, setEditColorTagInput)}
+                      placeholder="Add color tag"
+                    />
+                    <button
+                      type="button"
+                      className="size-add"
+                      onClick={() => {
+                        addEditColorTag(editColorTagInput);
+                        setEditColorTagInput("");
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="post-tag-suggestions">
+                    {metadataOptions.suggestedColorTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className={`brand-chip ${editColorTags.includes(tag) ? "selected" : ""}`}
+                        onClick={() => addEditColorTag(tag)}
+                      >
+                        {toDisplayLabel(tag)}
+                      </button>
+                    ))}
+                  </div>
+                  {editColorTags.length > 0 ? (
+                    <div className="post-tag-list">
+                      {editColorTags.map((tag) => (
+                        <span key={tag} className="post-tag-chip">
+                          {toDisplayLabel(tag)}
+                          <button
+                            type="button"
+                            onClick={() => setEditColorTags((prev) => removeTagValue(prev, tag))}
+                          >
+                            remove
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="post-tag-empty">No color tags selected.</p>
+                  )}
+                </div>
+
                 <div className="post-edit-actions">
-                  <button type="button" className="save-button save-button--sm" onClick={saveEdit} disabled={editSaving}>
+                  <button
+                    type="button"
+                    className="save-button save-button--sm"
+                    onClick={saveEdit}
+                    disabled={editSaving}
+                  >
                     {editSaving ? "Saving..." : "Save"}
                   </button>
-                  <button type="button" className="cancel-button cancel-button--sm" onClick={() => setEditing(false)}>
+                  <button
+                    type="button"
+                    className="cancel-button cancel-button--sm"
+                    onClick={() => setEditing(false)}
+                  >
                     Cancel
                   </button>
                 </div>
+                {editError && <p className="post-tag-empty">{editError}</p>}
               </div>
             ) : (
               <>
-                {post.caption && (
-                  <p className="post-detail-caption">{post.caption}</p>
-                )}
-                {priceLabel && (
-                  <p className="post-detail-price">{priceLabel}</p>
-                )}
+                {post.caption && <p className="post-detail-caption">{post.caption}</p>}
+                {priceLabel && <p className="post-detail-price">{priceLabel}</p>}
+
+                <div className="post-detail-metadata">
+                  <div className="post-detail-metadata-grid">
+                    <div className="post-detail-metadata-item">
+                      <span className="post-detail-metadata-label">Category</span>
+                      <span>{toDisplayLabel(post.category || UNKNOWN)}</span>
+                    </div>
+                    <div className="post-detail-metadata-item">
+                      <span className="post-detail-metadata-label">Subcategory</span>
+                      <span>{toDisplayLabel(post.subcategory || UNKNOWN)}</span>
+                    </div>
+                    <div className="post-detail-metadata-item">
+                      <span className="post-detail-metadata-label">Condition</span>
+                      <span>{toDisplayLabel(post.condition || UNKNOWN)}</span>
+                    </div>
+                    <div className="post-detail-metadata-item">
+                      <span className="post-detail-metadata-label">Size</span>
+                      <span>{toDisplayLabel(post.sizeLabel || UNKNOWN)}</span>
+                    </div>
+                    <div className="post-detail-metadata-item">
+                      <span className="post-detail-metadata-label">Brand</span>
+                      <span>{post.brand || "Unspecified"}</span>
+                    </div>
+                  </div>
+
+                  {styleTags.length > 0 && (
+                    <div>
+                      <span className="post-detail-metadata-label">Style tags</span>
+                      <div className="post-detail-tag-list">
+                        {styleTags.map((tag) => (
+                          <span key={tag} className="post-detail-tag">
+                            {toDisplayLabel(tag)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {colorTags.length > 0 && (
+                    <div>
+                      <span className="post-detail-metadata-label">Color tags</span>
+                      <div className="post-detail-tag-list">
+                        {colorTags.map((tag) => (
+                          <span key={tag} className="post-detail-tag">
+                            {toDisplayLabel(tag)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
@@ -237,7 +576,7 @@ function PostDetailPage({ currentUser }) {
                 initialCount={post.likeCount}
                 onLikeChange={handleLikeChange}
               />
-              <PatchButton postId={post.id} />
+              <PatchButton postId={post.id} telemetryContext={patchTelemetryContext} />
             </div>
 
             {isOwner && !editing && (
@@ -247,7 +586,21 @@ function PostDetailPage({ currentUser }) {
                   className="save-button save-button--sm"
                   onClick={() => {
                     setEditCaption(post.caption || "");
-                    setEditPrice(isMarket && post.priceCents ? (post.priceCents / 100).toString() : "");
+                    setEditPrice(
+                      isMarket && Number.isFinite(post.priceCents)
+                        ? (post.priceCents / 100).toString()
+                        : ""
+                    );
+                    setEditCategory(post.category || UNKNOWN);
+                    setEditSubcategory(post.subcategory || UNKNOWN);
+                    setEditBrand(post.brand || "");
+                    setEditCondition(post.condition || UNKNOWN);
+                    setEditSizeLabel(post.sizeLabel || UNKNOWN);
+                    setEditStyleTags(normalizeTags(post.styleTags));
+                    setEditColorTags(normalizeTags(post.colorTags));
+                    setEditStyleTagInput("");
+                    setEditColorTagInput("");
+                    setEditError("");
                     setEditing(true);
                   }}
                 >
@@ -269,7 +622,11 @@ function PostDetailPage({ currentUser }) {
                     <button type="button" className="cancel-button cancel-button--sm" onClick={deletePost}>
                       Yes, delete
                     </button>
-                    <button type="button" className="save-button save-button--sm" onClick={() => setDeleteConfirm(false)}>
+                    <button
+                      type="button"
+                      className="save-button save-button--sm"
+                      onClick={() => setDeleteConfirm(false)}
+                    >
                       Cancel
                     </button>
                   </>

@@ -2,6 +2,12 @@ const express = require("express");
 const { getModels } = require("../models");
 const authMiddleware = require("../middleware/auth");
 const { optionalAuthMiddleware } = require("../middleware/auth");
+const {
+  getPostMetadataFromPost,
+  getPostMetadataOptions,
+  hasPostMetadataFields,
+  normalizeAndValidatePostMetadata,
+} = require("../services/postMetadata");
 
 const router = express.Router();
 
@@ -92,6 +98,10 @@ router.get("/mine", authMiddleware, async (req, res) => {
   }
 });
 
+router.get("/metadata/options", (_req, res) => {
+  return res.json(getPostMetadataOptions());
+});
+
 router.post("/", authMiddleware, async (req, res) => {
   const { Post } = getModels();
   const { caption, imageUrl, type, priceCents, isPublic } = req.body || {};
@@ -125,6 +135,10 @@ router.post("/", authMiddleware, async (req, res) => {
 
   const normalizedIsPublic =
     typeof isPublic === "boolean" ? isPublic : isPublic === undefined ? true : Boolean(isPublic);
+  const normalizedMetadata = normalizeAndValidatePostMetadata(req.body || {}, { mode: "create" });
+  if (normalizedMetadata.error) {
+    return res.status(400).json({ message: normalizedMetadata.error });
+  }
 
   try {
     const post = await Post.create({
@@ -134,6 +148,7 @@ router.post("/", authMiddleware, async (req, res) => {
       imageUrl: imageUrl.trim(),
       priceCents: normalizedPrice,
       isPublic: normalizedIsPublic,
+      ...normalizedMetadata.value,
     });
 
     return res.status(201).json({ post });
@@ -221,6 +236,25 @@ router.patch("/:postId", authMiddleware, async (req, res) => {
         return res.status(400).json({ message: "priceCents must be a valid non-negative number." });
       }
       post.priceCents = normalizedPrice;
+    }
+
+    if (hasPostMetadataFields(req.body)) {
+      const normalizedMetadata = normalizeAndValidatePostMetadata(req.body, {
+        mode: "patch",
+        current: getPostMetadataFromPost(post),
+      });
+
+      if (normalizedMetadata.error) {
+        return res.status(400).json({ message: normalizedMetadata.error });
+      }
+
+      post.category = normalizedMetadata.value.category;
+      post.subcategory = normalizedMetadata.value.subcategory;
+      post.brand = normalizedMetadata.value.brand;
+      post.styleTags = normalizedMetadata.value.styleTags;
+      post.colorTags = normalizedMetadata.value.colorTags;
+      post.condition = normalizedMetadata.value.condition;
+      post.sizeLabel = normalizedMetadata.value.sizeLabel;
     }
 
     await post.save();
