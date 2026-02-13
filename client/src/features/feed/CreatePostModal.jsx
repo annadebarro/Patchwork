@@ -34,6 +34,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [colorTags, setColorTags] = useState([]);
   const [styleTagInput, setStyleTagInput] = useState("");
   const [colorTagInput, setColorTagInput] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
 
   const subcategoryOptions = useMemo(() => {
     const options = metadataOptions?.subcategoriesByCategory?.[category];
@@ -57,6 +58,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setColorTags([]);
       setStyleTagInput("");
       setColorTagInput("");
+      setShowDetails(false);
       return;
     }
 
@@ -259,6 +261,18 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
             </label>
           )}
 
+          {type !== "market" && !showDetails && (
+            <button
+              type="button"
+              className="post-details-toggle"
+              onClick={() => setShowDetails(true)}
+            >
+              Add details (optional)
+            </button>
+          )}
+
+          {(type === "market" || showDetails) && (
+          <>
           <div className="post-metadata-grid">
             <label>
               Category
@@ -425,6 +439,8 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
               <p className="post-tag-empty">No color tags selected.</p>
             )}
           </div>
+          </>
+          )}
 
           <label>
             Image

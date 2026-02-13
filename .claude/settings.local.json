@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(command:*)",
+      "Bash(test:*)",
+      "Bash(brew:*)"
+    ]
+  }
+}

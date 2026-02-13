@@ -267,6 +267,16 @@ function PostDetailPage({ currentUser }) {
   const styleTags = normalizeTags(post.styleTags);
   const colorTags = normalizeTags(post.colorTags);
 
+  const hasMetadata =
+    isMarket ||
+    (post.category && post.category !== UNKNOWN) ||
+    (post.subcategory && post.subcategory !== UNKNOWN) ||
+    (post.condition && post.condition !== UNKNOWN) ||
+    (post.sizeLabel && post.sizeLabel !== UNKNOWN) ||
+    !!post.brand ||
+    styleTags.length > 0 ||
+    colorTags.length > 0;
+
   return (
     <div className="feed-content">
       <div className="post-detail">
@@ -516,56 +526,58 @@ function PostDetailPage({ currentUser }) {
                 {post.caption && <p className="post-detail-caption">{post.caption}</p>}
                 {priceLabel && <p className="post-detail-price">{priceLabel}</p>}
 
-                <div className="post-detail-metadata">
-                  <div className="post-detail-metadata-grid">
-                    <div className="post-detail-metadata-item">
-                      <span className="post-detail-metadata-label">Category</span>
-                      <span>{toDisplayLabel(post.category || UNKNOWN)}</span>
+                {hasMetadata && (
+                  <div className="post-detail-metadata">
+                    <div className="post-detail-metadata-grid">
+                      <div className="post-detail-metadata-item">
+                        <span className="post-detail-metadata-label">Category</span>
+                        <span>{toDisplayLabel(post.category || UNKNOWN)}</span>
+                      </div>
+                      <div className="post-detail-metadata-item">
+                        <span className="post-detail-metadata-label">Subcategory</span>
+                        <span>{toDisplayLabel(post.subcategory || UNKNOWN)}</span>
+                      </div>
+                      <div className="post-detail-metadata-item">
+                        <span className="post-detail-metadata-label">Condition</span>
+                        <span>{toDisplayLabel(post.condition || UNKNOWN)}</span>
+                      </div>
+                      <div className="post-detail-metadata-item">
+                        <span className="post-detail-metadata-label">Size</span>
+                        <span>{toDisplayLabel(post.sizeLabel || UNKNOWN)}</span>
+                      </div>
+                      <div className="post-detail-metadata-item">
+                        <span className="post-detail-metadata-label">Brand</span>
+                        <span>{post.brand || "Unspecified"}</span>
+                      </div>
                     </div>
-                    <div className="post-detail-metadata-item">
-                      <span className="post-detail-metadata-label">Subcategory</span>
-                      <span>{toDisplayLabel(post.subcategory || UNKNOWN)}</span>
-                    </div>
-                    <div className="post-detail-metadata-item">
-                      <span className="post-detail-metadata-label">Condition</span>
-                      <span>{toDisplayLabel(post.condition || UNKNOWN)}</span>
-                    </div>
-                    <div className="post-detail-metadata-item">
-                      <span className="post-detail-metadata-label">Size</span>
-                      <span>{toDisplayLabel(post.sizeLabel || UNKNOWN)}</span>
-                    </div>
-                    <div className="post-detail-metadata-item">
-                      <span className="post-detail-metadata-label">Brand</span>
-                      <span>{post.brand || "Unspecified"}</span>
-                    </div>
+
+                    {styleTags.length > 0 && (
+                      <div>
+                        <span className="post-detail-metadata-label">Style tags</span>
+                        <div className="post-detail-tag-list">
+                          {styleTags.map((tag) => (
+                            <span key={tag} className="post-detail-tag">
+                              {toDisplayLabel(tag)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {colorTags.length > 0 && (
+                      <div>
+                        <span className="post-detail-metadata-label">Color tags</span>
+                        <div className="post-detail-tag-list">
+                          {colorTags.map((tag) => (
+                            <span key={tag} className="post-detail-tag">
+                              {toDisplayLabel(tag)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {styleTags.length > 0 && (
-                    <div>
-                      <span className="post-detail-metadata-label">Style tags</span>
-                      <div className="post-detail-tag-list">
-                        {styleTags.map((tag) => (
-                          <span key={tag} className="post-detail-tag">
-                            {toDisplayLabel(tag)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {colorTags.length > 0 && (
-                    <div>
-                      <span className="post-detail-metadata-label">Color tags</span>
-                      <div className="post-detail-tag-list">
-                        {colorTags.map((tag) => (
-                          <span key={tag} className="post-detail-tag">
-                            {toDisplayLabel(tag)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                )}
               </>
             )}
 

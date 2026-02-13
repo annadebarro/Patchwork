@@ -1102,6 +1102,23 @@ button:disabled {
   background: #fff;
 }
 
+.post-details-toggle {
+  background: none;
+  border: 1px dashed var(--denim-mid);
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: var(--denim-mid);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-family: inherit;
+  width: 100%;
+}
+
+.post-details-toggle:hover {
+  border-color: var(--denim-accent);
+  color: var(--denim-accent);
+}
+
 .post-metadata-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
