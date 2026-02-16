@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 
 function MessagesPage({ currentUser }) {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState([]);
   const [activeConvoId, setActiveConvoId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -43,6 +46,18 @@ function MessagesPage({ currentUser }) {
     }
     fetchConversations();
   }, []);
+
+  // Auto-select conversation from URL query param (e.g. from notification click)
+  useEffect(() => {
+    const convoParam = searchParams.get("convo");
+    if (convoParam && conversations.length > 0) {
+      const match = conversations.find((c) => c.id === convoParam);
+      if (match) {
+        setActiveConvoId(convoParam);
+      }
+      setSearchParams({}, { replace: true });
+    }
+  }, [conversations, searchParams, setSearchParams]);
 
   // Socket.IO connection
   useEffect(() => {
@@ -365,7 +380,24 @@ function MessagesPage({ currentUser }) {
           {activeConvoId ? (
             <>
               <div className="chat-header">
-                <h3>{convoDetail ? getConvoName(convoDetail) : "..."}</h3>
+                <h3>
+                  {convoDetail ? (
+                    convoDetail.participants?.length === 2 ? (
+                      <button
+                        type="button"
+                        className="chat-header-name-link"
+                        onClick={() => {
+                          const other = convoDetail.participants.find((p) => p.user?.id !== currentUser?.id);
+                          if (other?.user?.username) navigate(`/userpage/${other.user.username}`);
+                        }}
+                      >
+                        {getConvoName(convoDetail)}
+                      </button>
+                    ) : (
+                      getConvoName(convoDetail)
+                    )
+                  ) : "..."}
+                </h3>
                 {convoDetail && convoDetail.participants?.length > 2 && (
                   <span className="chat-header-count">
                     {convoDetail.participants.length} members
@@ -383,7 +415,15 @@ function MessagesPage({ currentUser }) {
                     return (
                       <div key={msg.id} className={`chat-bubble ${isOwn ? "chat-bubble--own" : "chat-bubble--other"}`}>
                         {!isOwn && (
-                          <span className="chat-bubble-sender">{msg.sender?.name || msg.sender?.username}</span>
+                          <button
+                            type="button"
+                            className="chat-bubble-sender-link"
+                            onClick={() => {
+                              if (msg.sender?.username) navigate(`/userpage/${msg.sender.username}`);
+                            }}
+                          >
+                            {msg.sender?.name || msg.sender?.username}
+                          </button>
                         )}
                         <p className="chat-bubble-body">{msg.body}</p>
                         <span className="chat-bubble-time">{formatMsgTime(msg.createdAt)}</span>

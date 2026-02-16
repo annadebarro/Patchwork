@@ -195,6 +195,8 @@ function AuthedLayout({ onLogout, onOpenCreatePost }) {
                     setNotifPanelOpen(false);
                     if (notif.type === "follow") {
                       navigate(`/userpage/${notif.actor?.username}`);
+                    } else if (notif.type === "message") {
+                      navigate(notif.conversationId ? `/messages?convo=${notif.conversationId}` : "/messages");
                     } else if (notif.postId) {
                       navigate(`/post/${notif.postId}`);
                     }

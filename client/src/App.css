@@ -3624,6 +3624,33 @@ button:disabled {
   border: 2px solid var(--denim-wash);
 }
 
+.chat-header-name-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chat-header-name-link:hover {
+  text-decoration: underline;
+}
+
+.chat-bubble-sender-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--rust);
+  cursor: pointer;
+}
+
+.chat-bubble-sender-link:hover {
+  text-decoration: underline;
+}
+
 .chat-bubble-sender {
   font-size: 0.75rem;
   font-weight: 700;
