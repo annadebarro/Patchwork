@@ -14,6 +14,7 @@ import {
   toDisplayLabel,
   UNKNOWN,
 } from "../../shared/posts/postMetadata";
+import ImageCropper from "./ImageCropper";
 
 function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [type, setType] = useState("regular");
@@ -21,6 +22,8 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [price, setPrice] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
+  const [showCropper, setShowCropper] = useState(false);
+  const [rawPreviewUrl, setRawPreviewUrl] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -48,6 +51,9 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setPrice("");
       setImageFile(null);
       setPreviewUrl("");
+      setShowCropper(false);
+      if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
+      setRawPreviewUrl("");
       setError("");
       setCategory(UNKNOWN);
       setSubcategory(UNKNOWN);
@@ -92,16 +98,37 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
 
   function handleFileChange(event) {
     const file = event.target.files?.[0] || null;
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
     if (file) {
-      setImageFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      const url = URL.createObjectURL(file);
+      setRawPreviewUrl(url);
+      setShowCropper(true);
+      setImageFile(null);
+      setPreviewUrl("");
     } else {
+      setRawPreviewUrl("");
+      setShowCropper(false);
       setImageFile(null);
       setPreviewUrl("");
     }
+  }
+
+  function handleCropDone(croppedFile) {
+    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
+    setRawPreviewUrl("");
+    setShowCropper(false);
+    setImageFile(croppedFile);
+    setPreviewUrl(URL.createObjectURL(croppedFile));
+  }
+
+  function handleChangeImage() {
+    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
+    setRawPreviewUrl("");
+    setShowCropper(false);
+    setImageFile(null);
+    setPreviewUrl("");
+    document.querySelector(".create-post-form input[type='file']")?.click();
   }
 
   function addStyleTag(rawTag) {
@@ -447,7 +474,15 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
             <input type="file" accept="image/*" onChange={handleFileChange} />
           </label>
 
-          {previewUrl && (
+          {showCropper && rawPreviewUrl && (
+            <ImageCropper
+              imageUrl={rawPreviewUrl}
+              onCropDone={handleCropDone}
+              onChangeImage={handleChangeImage}
+            />
+          )}
+
+          {!showCropper && previewUrl && (
             <div className="create-post-preview">
               <img src={previewUrl} alt="Preview" />
             </div>
