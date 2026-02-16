@@ -1256,6 +1256,32 @@ button:disabled {
   color: var(--cream);
 }
 
+.image-cropper-rotate-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid var(--denim-dark);
+  border-radius: 50%;
+  background: var(--cream);
+  color: var(--denim-dark);
+  cursor: pointer;
+  margin-left: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.image-cropper-rotate-btn:hover {
+  background: var(--denim-mid);
+  color: var(--cream);
+}
+
+.image-cropper-rotate-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .image-cropper-zoom-label {
   display: flex;
   flex-direction: column;

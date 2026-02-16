@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   parseApiResponse,
@@ -38,6 +38,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [styleTagInput, setStyleTagInput] = useState("");
   const [colorTagInput, setColorTagInput] = useState("");
   const [showDetails, setShowDetails] = useState(false);
+  const rawFileRef = useRef(null);
 
   const subcategoryOptions = useMemo(() => {
     const options = metadataOptions?.subcategoriesByCategory?.[category];
@@ -65,6 +66,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setStyleTagInput("");
       setColorTagInput("");
       setShowDetails(false);
+      rawFileRef.current = null;
       return;
     }
 
@@ -101,12 +103,14 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
     if (file) {
+      rawFileRef.current = file;
       const url = URL.createObjectURL(file);
       setRawPreviewUrl(url);
       setShowCropper(true);
       setImageFile(null);
       setPreviewUrl("");
     } else {
+      rawFileRef.current = null;
       setRawPreviewUrl("");
       setShowCropper(false);
       setImageFile(null);
@@ -120,6 +124,15 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
     setShowCropper(false);
     setImageFile(croppedFile);
     setPreviewUrl(URL.createObjectURL(croppedFile));
+  }
+
+  function handleUseOriginal() {
+    const file = rawFileRef.current;
+    if (!file) return;
+    setShowCropper(false);
+    setImageFile(file);
+    setPreviewUrl(rawPreviewUrl);
+    setRawPreviewUrl("");
   }
 
   function handleChangeImage() {
@@ -479,6 +492,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
               imageUrl={rawPreviewUrl}
               onCropDone={handleCropDone}
               onChangeImage={handleChangeImage}
+              onUseOriginal={handleUseOriginal}
             />
           )}
 
