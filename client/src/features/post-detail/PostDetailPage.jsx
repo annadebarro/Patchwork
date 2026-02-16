@@ -12,6 +12,8 @@ import {
   toDisplayLabel,
   UNKNOWN,
 } from "../../shared/posts/postMetadata";
+import ImageCarousel from "../../shared/ui/ImageCarousel";
+import SortableThumbnails from "../../shared/ui/SortableThumbnails";
 import LikeButton from "./LikeButton";
 import PatchButton from "./PatchButton";
 import CommentSection from "./CommentSection";
@@ -26,6 +28,12 @@ function normalizeRankPosition(value) {
   if (!Number.isFinite(parsed)) return null;
   const normalized = Math.trunc(parsed);
   return normalized > 0 ? normalized : null;
+}
+
+function getImages(post) {
+  if (Array.isArray(post.imageUrls) && post.imageUrls.length > 0) return post.imageUrls;
+  if (post.imageUrl) return [post.imageUrl];
+  return [];
 }
 
 function normalizeTags(value) {
@@ -58,6 +66,7 @@ function PostDetailPage({ currentUser }) {
   const [editColorTags, setEditColorTags] = useState([]);
   const [editStyleTagInput, setEditStyleTagInput] = useState("");
   const [editColorTagInput, setEditColorTagInput] = useState("");
+  const [editImageUrls, setEditImageUrls] = useState([]);
 
   const feedTelemetry = location.state?.feedTelemetry;
   const patchTelemetryContext = {
@@ -162,6 +171,7 @@ function PostDetailPage({ currentUser }) {
     try {
       const payload = {
         caption: editCaption,
+        imageUrls: editImageUrls,
         category: editCategory,
         subcategory: editSubcategory,
         brand: editBrand,
@@ -289,7 +299,7 @@ function PostDetailPage({ currentUser }) {
 
         <div className="post-detail-card">
           <div className="post-detail-image-wrap">
-            <img src={post.imageUrl} alt={post.caption || "Post"} className="post-detail-image" />
+            <ImageCarousel images={getImages(post)} size="detail" />
             {post.isSold && <div className="sold-badge sold-badge--detail">SOLD</div>}
           </div>
 
@@ -317,6 +327,22 @@ function PostDetailPage({ currentUser }) {
                   rows={3}
                   maxLength={2000}
                 />
+
+                {editImageUrls.length > 0 && (
+                  <div>
+                    <span className="post-detail-metadata-label">Photos (drag to reorder)</span>
+                    <SortableThumbnails
+                      items={editImageUrls.map((url, i) => ({ id: `img-${i}-${url.slice(-12)}`, url }))}
+                      onReorder={(newItems) => setEditImageUrls(newItems.map((item) => item.url))}
+                      onDelete={(id) => {
+                        const idx = editImageUrls.findIndex((url, i) => `img-${i}-${url.slice(-12)}` === id);
+                        if (idx !== -1) {
+                          setEditImageUrls((prev) => prev.filter((_, i) => i !== idx));
+                        }
+                      }}
+                    />
+                  </div>
+                )}
 
                 {isMarket && (
                   <label className="post-edit-price-label">
@@ -612,6 +638,7 @@ function PostDetailPage({ currentUser }) {
                     setEditColorTags(normalizeTags(post.colorTags));
                     setEditStyleTagInput("");
                     setEditColorTagInput("");
+                    setEditImageUrls(getImages(post));
                     setEditError("");
                     setEditing(true);
                   }}

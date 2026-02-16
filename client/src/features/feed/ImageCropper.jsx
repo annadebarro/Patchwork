@@ -10,11 +10,11 @@ const RATIO_PAIRS = [
   { portrait: { label: "3:4", value: 3 / 4 }, landscape: { label: "4:3", value: 4 / 3 } },
 ];
 
-function ImageCropper({ imageUrl, onCropDone, onChangeImage, onUseOriginal, mode = "post" }) {
+function ImageCropper({ imageUrl, onCropDone, onChangeImage, onUseOriginal, mode = "post", lockedAspect = null }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [naturalAspect, setNaturalAspect] = useState(1);
-  const [aspect, setAspect] = useState(mode === "avatar" ? 1 : null);
+  const [aspect, setAspect] = useState(mode === "avatar" ? 1 : lockedAspect !== null ? lockedAspect : null);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [hasModified, setHasModified] = useState(false);
 
@@ -37,8 +37,11 @@ function ImageCropper({ imageUrl, onCropDone, onChangeImage, onUseOriginal, mode
     setNaturalAspect(mediaSize.naturalWidth / mediaSize.naturalHeight);
   }, []);
 
+  const showAspectButtons = mode === "post" && lockedAspect === null;
+
   function getActiveAspect() {
     if (mode === "avatar") return 1;
+    if (lockedAspect !== null) return lockedAspect;
     return aspect === null ? naturalAspect : aspect;
   }
 
@@ -96,7 +99,7 @@ function ImageCropper({ imageUrl, onCropDone, onChangeImage, onUseOriginal, mode
       </div>
 
       <div className="image-cropper-controls">
-        {mode === "post" && (
+        {showAspectButtons && (
           <div className="image-cropper-aspects">
             {aspectOptions.map((r) => (
               <button

@@ -102,18 +102,36 @@ router.get("/metadata/options", (_req, res) => {
   return res.json(getPostMetadataOptions());
 });
 
+const MAX_IMAGES = 10;
+
+function normalizeImageUrls(body) {
+  if (Array.isArray(body.imageUrls)) {
+    const urls = body.imageUrls.filter((u) => typeof u === "string" && u.trim());
+    return urls.length > 0 ? urls.map((u) => u.trim()) : null;
+  }
+  if (typeof body.imageUrl === "string" && body.imageUrl.trim()) {
+    return [body.imageUrl.trim()];
+  }
+  return null;
+}
+
 router.post("/", authMiddleware, async (req, res) => {
   const { Post } = getModels();
-  const { caption, imageUrl, type, priceCents, isPublic } = req.body || {};
+  const { caption, type, priceCents, isPublic } = req.body || {};
 
   const normalizedType = normalizeType(type);
   if (!normalizedType) {
     return res.status(400).json({ message: "Type must be either 'regular' or 'market'." });
   }
 
-  if (typeof imageUrl !== "string" || !imageUrl.trim()) {
-    return res.status(400).json({ message: "imageUrl is required." });
+  const imageUrls = normalizeImageUrls(req.body || {});
+  if (!imageUrls) {
+    return res.status(400).json({ message: "At least one image is required." });
   }
+  if (imageUrls.length > MAX_IMAGES) {
+    return res.status(400).json({ message: `A post can have at most ${MAX_IMAGES} images.` });
+  }
+  const imageUrl = imageUrls[0];
 
   if (caption !== undefined && typeof caption !== "string") {
     return res.status(400).json({ message: "Caption must be a string." });
@@ -145,7 +163,8 @@ router.post("/", authMiddleware, async (req, res) => {
       userId: req.user.id,
       type: normalizedType,
       caption: cleanedCaption,
-      imageUrl: imageUrl.trim(),
+      imageUrl,
+      imageUrls,
       priceCents: normalizedPrice,
       isPublic: normalizedIsPublic,
       ...normalizedMetadata.value,
@@ -228,6 +247,21 @@ router.patch("/:postId", authMiddleware, async (req, res) => {
         });
       }
       post.caption = cleaned;
+    }
+
+    if (req.body.imageUrls !== undefined) {
+      if (!Array.isArray(req.body.imageUrls)) {
+        return res.status(400).json({ message: "imageUrls must be an array." });
+      }
+      const urls = req.body.imageUrls.filter((u) => typeof u === "string" && u.trim());
+      if (urls.length === 0) {
+        return res.status(400).json({ message: "A post must have at least one image." });
+      }
+      if (urls.length > MAX_IMAGES) {
+        return res.status(400).json({ message: `A post can have at most ${MAX_IMAGES} images.` });
+      }
+      post.imageUrls = urls.map((u) => u.trim());
+      post.imageUrl = post.imageUrls[0];
     }
 
     if (priceCents !== undefined) {

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import ImageCarousel from "../../shared/ui/ImageCarousel";
 
 const VISIBILITY_THRESHOLD = 0.5;
 
 function formatPrice(priceCents) {
   if (!Number.isFinite(priceCents)) return "";
   return `$${(priceCents / 100).toFixed(2)}`;
+}
+
+function getImages(post) {
+  if (Array.isArray(post.imageUrls) && post.imageUrls.length > 0) return post.imageUrls;
+  if (post.imageUrl) return [post.imageUrl];
+  return [];
 }
 
 function PostCard({
@@ -26,6 +33,7 @@ function PostCard({
   const caption = typeof post.caption === "string" ? post.caption : "";
   const authorUsername = post.author?.username;
   const isSold = Boolean(post.isSold);
+  const images = getImages(post);
 
   const emitDwell = useCallback((now = Date.now()) => {
     if (visibleSinceRef.current === null || typeof onFeedDwell !== "function") {
@@ -124,7 +132,7 @@ function PostCard({
           if (e.key === "Enter") openPost();
         }}
       >
-        <img src={post.imageUrl} alt="Post" />
+        <ImageCarousel images={images} size="feed" />
       </div>
     );
   }
@@ -140,7 +148,7 @@ function PostCard({
         if (e.key === "Enter") openPost();
       }}
     >
-      <img src={post.imageUrl} alt={caption || "Post"} />
+      <ImageCarousel images={images} size="feed" />
       {isSold && <div className="sold-badge">SOLD</div>}
       {isMarket && !isSold && (
         <div className="sale-badge">

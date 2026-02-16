@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   parseApiResponse,
@@ -15,17 +15,26 @@ import {
   UNKNOWN,
 } from "../../shared/posts/postMetadata";
 import ImageCropper from "./ImageCropper";
+import SortableThumbnails from "../../shared/ui/SortableThumbnails";
+
+const MAX_IMAGES = 10;
+let nextThumbId = 1;
 
 function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [type, setType] = useState("regular");
   const [caption, setCaption] = useState("");
   const [price, setPrice] = useState("");
-  const [imageFile, setImageFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [showCropper, setShowCropper] = useState(false);
-  const [rawPreviewUrl, setRawPreviewUrl] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Multi-image state
+  // Each item: { id, file (cropped or original), previewUrl }
+  const [imageItems, setImageItems] = useState([]);
+  // Cropping queue: raw files waiting to be cropped
+  const [cropQueue, setCropQueue] = useState([]);
+  const [cropRawUrl, setCropRawUrl] = useState("");
+  const [firstImageAspect, setFirstImageAspect] = useState(null);
+  const fileInputRef = useRef(null);
 
   const [metadataOptions, setMetadataOptions] = useState(() => getFallbackPostMetadataOptions());
   const [category, setCategory] = useState(UNKNOWN);
@@ -38,7 +47,8 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [styleTagInput, setStyleTagInput] = useState("");
   const [colorTagInput, setColorTagInput] = useState("");
   const [showDetails, setShowDetails] = useState(false);
-  const rawFileRef = useRef(null);
+
+  const isCropping = cropQueue.length > 0 && cropRawUrl;
 
   const subcategoryOptions = useMemo(() => {
     const options = metadataOptions?.subcategoriesByCategory?.[category];
@@ -50,11 +60,13 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setType("regular");
       setCaption("");
       setPrice("");
-      setImageFile(null);
-      setPreviewUrl("");
-      setShowCropper(false);
-      if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
-      setRawPreviewUrl("");
+      // Revoke all preview URLs
+      imageItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      setImageItems([]);
+      setCropQueue([]);
+      if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
+      setCropRawUrl("");
+      setFirstImageAspect(null);
       setError("");
       setCategory(UNKNOWN);
       setSubcategory(UNKNOWN);
@@ -66,7 +78,6 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setStyleTagInput("");
       setColorTagInput("");
       setShowDetails(false);
-      rawFileRef.current = null;
       return;
     }
 
@@ -77,9 +88,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
           setMetadataOptions(options);
         }
       })
-      .catch(() => {
-        // Keep fallback metadata options when options API fails.
-      });
+      .catch(() => {});
 
     return () => {
       ignore = true;
@@ -87,61 +96,138 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   }, [isOpen]);
 
   useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
-
-  useEffect(() => {
     if (!subcategoryOptions.includes(subcategory)) {
       setSubcategory(UNKNOWN);
     }
   }, [subcategory, subcategoryOptions]);
 
-  function handleFileChange(event) {
-    const file = event.target.files?.[0] || null;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
-    if (file) {
-      rawFileRef.current = file;
-      const url = URL.createObjectURL(file);
-      setRawPreviewUrl(url);
-      setShowCropper(true);
-      setImageFile(null);
-      setPreviewUrl("");
-    } else {
-      rawFileRef.current = null;
-      setRawPreviewUrl("");
-      setShowCropper(false);
-      setImageFile(null);
-      setPreviewUrl("");
+  // Start cropping the next file in the queue
+  const startNextCrop = useCallback((queue) => {
+    if (queue.length === 0) {
+      setCropRawUrl("");
+      return;
     }
+    const rawFile = queue[0];
+    setCropRawUrl(URL.createObjectURL(rawFile));
+  }, []);
+
+  function handleFileChange(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    const slotsLeft = MAX_IMAGES - imageItems.length;
+    if (slotsLeft <= 0) {
+      setError(`Maximum ${MAX_IMAGES} images per post.`);
+      return;
+    }
+
+    const toAdd = files.slice(0, slotsLeft);
+    if (files.length > slotsLeft) {
+      setError(`Only ${slotsLeft} more image${slotsLeft === 1 ? "" : "s"} can be added (max ${MAX_IMAGES}).`);
+    }
+
+    setCropQueue(toAdd);
+    startNextCrop(toAdd);
   }
 
   function handleCropDone(croppedFile) {
-    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
-    setRawPreviewUrl("");
-    setShowCropper(false);
-    setImageFile(croppedFile);
-    setPreviewUrl(URL.createObjectURL(croppedFile));
+    const previewUrl = URL.createObjectURL(croppedFile);
+    const id = `thumb-${nextThumbId++}`;
+
+    // If this is the first image overall, record its aspect for locking subsequent crops
+    const isFirstImage = imageItems.length === 0 && cropQueue.length === cropQueue.length; // always first of this batch if no items yet
+    if (imageItems.length === 0 && firstImageAspect === null) {
+      // Detect aspect from cropped file
+      const img = new Image();
+      img.onload = () => {
+        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = previewUrl;
+    }
+
+    setImageItems((prev) => [...prev, { id, file: croppedFile, previewUrl }]);
+
+    // Advance crop queue
+    if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
+    const remaining = cropQueue.slice(1);
+    setCropQueue(remaining);
+    startNextCrop(remaining);
   }
 
   function handleUseOriginal() {
-    const file = rawFileRef.current;
-    if (!file) return;
-    setShowCropper(false);
-    setImageFile(file);
-    setPreviewUrl(rawPreviewUrl);
-    setRawPreviewUrl("");
+    const rawFile = cropQueue[0];
+    if (!rawFile) return;
+
+    const previewUrl = cropRawUrl; // reuse the blob URL
+    const id = `thumb-${nextThumbId++}`;
+
+    if (imageItems.length === 0 && firstImageAspect === null) {
+      const img = new Image();
+      img.onload = () => {
+        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
+      };
+      img.src = previewUrl;
+    }
+
+    setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl }]);
+
+    const remaining = cropQueue.slice(1);
+    setCropQueue(remaining);
+    setCropRawUrl("");
+    startNextCrop(remaining);
   }
 
   function handleChangeImage() {
-    if (rawPreviewUrl) URL.revokeObjectURL(rawPreviewUrl);
-    setRawPreviewUrl("");
-    setShowCropper(false);
-    setImageFile(null);
-    setPreviewUrl("");
-    document.querySelector(".create-post-form input[type='file']")?.click();
+    // Skip current crop, discard this file
+    if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
+    const remaining = cropQueue.slice(1);
+    setCropQueue(remaining);
+    startNextCrop(remaining);
+  }
+
+  function handleSkipCrop() {
+    // Skip remaining crop queue entirely, use originals
+    cropQueue.forEach((rawFile, i) => {
+      if (i === 0 && cropRawUrl) {
+        // First one already has a URL
+        const id = `thumb-${nextThumbId++}`;
+        setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl: cropRawUrl }]);
+      } else {
+        const url = URL.createObjectURL(rawFile);
+        const id = `thumb-${nextThumbId++}`;
+        setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl: url }]);
+      }
+    });
+    setCropQueue([]);
+    setCropRawUrl("");
+  }
+
+  function handleReorder(newItems) {
+    setImageItems(newItems);
+    // If order changed, update firstImageAspect from the new first image
+    if (newItems.length > 0) {
+      const img = new Image();
+      img.onload = () => {
+        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(newItems[0].file);
+    }
+  }
+
+  function handleDeleteThumb(id) {
+    setImageItems((prev) => {
+      const filtered = prev.filter((item) => {
+        if (item.id === id) {
+          URL.revokeObjectURL(item.previewUrl);
+          return false;
+        }
+        return true;
+      });
+      return filtered;
+    });
   }
 
   function addStyleTag(rawTag) {
@@ -166,8 +252,8 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
     event.preventDefault();
     setError("");
 
-    if (!imageFile) {
-      setError("Please select an image to upload.");
+    if (imageItems.length === 0) {
+      setError("Please select at least one image to upload.");
       return;
     }
 
@@ -187,32 +273,37 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
 
     setSubmitting(true);
     try {
-      const formData = new FormData();
-      formData.append("file", imageFile);
-      formData.append("folder", "posts");
+      // Upload all images
+      const imageUrls = [];
+      for (const item of imageItems) {
+        const formData = new FormData();
+        formData.append("file", item.file);
+        formData.append("folder", "posts");
 
-      const uploadRes = await apiFetch("/uploads", {
-        method: "POST",
-        body: formData,
-        surface: REQUEST_SURFACES.SOCIAL_FEED,
-      });
-      const uploadData = await parseApiResponse(uploadRes);
-      if (!uploadRes.ok) {
-        const message = uploadData?.error || uploadData?.message || `Upload failed (${uploadRes.status})`;
-        setError(message);
-        return;
-      }
+        const uploadRes = await apiFetch("/uploads", {
+          method: "POST",
+          body: formData,
+          surface: REQUEST_SURFACES.SOCIAL_FEED,
+        });
+        const uploadData = await parseApiResponse(uploadRes);
+        if (!uploadRes.ok) {
+          const message = uploadData?.error || uploadData?.message || `Upload failed (${uploadRes.status})`;
+          setError(message);
+          return;
+        }
 
-      const imageUrl = uploadData?.publicUrl;
-      if (!imageUrl) {
-        setError("Upload succeeded but no public URL was returned.");
-        return;
+        const publicUrl = uploadData?.publicUrl;
+        if (!publicUrl) {
+          setError("Upload succeeded but no public URL was returned.");
+          return;
+        }
+        imageUrls.push(publicUrl);
       }
 
       const payload = {
         type,
         caption: caption.trim(),
-        imageUrl,
+        imageUrls,
         category,
         subcategory,
         brand,
@@ -254,6 +345,15 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   }
 
   if (!isOpen) return null;
+
+  // Determine locked aspect for 2nd+ images
+  const currentCropIsFirst = imageItems.length === 0;
+  const lockedAspect = currentCropIsFirst ? null : firstImageAspect;
+
+  const thumbItems = imageItems.map((item) => ({
+    id: item.id,
+    url: item.previewUrl,
+  }));
 
   return (
     <div className="create-post-overlay" role="dialog" aria-modal="true">
@@ -482,27 +582,63 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
           </>
           )}
 
-          <label>
-            Image
-            <input type="file" accept="image/*" onChange={handleFileChange} />
-          </label>
+          <div>
+            <label>
+              Images ({imageItems.length}/{MAX_IMAGES})
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileChange}
+                disabled={isCropping}
+              />
+            </label>
+          </div>
 
-          {showCropper && rawPreviewUrl && (
-            <ImageCropper
-              imageUrl={rawPreviewUrl}
-              onCropDone={handleCropDone}
-              onChangeImage={handleChangeImage}
-              onUseOriginal={handleUseOriginal}
-            />
-          )}
-
-          {!showCropper && previewUrl && (
-            <div className="create-post-preview">
-              <img src={previewUrl} alt="Preview" />
+          {isCropping && (
+            <div>
+              <p className="field-note">
+                Cropping image {imageItems.length + 1} of {imageItems.length + cropQueue.length}
+                {cropQueue.length > 1 && (
+                  <button type="button" className="cancel-button cancel-button--sm" style={{ marginLeft: 8 }} onClick={handleSkipCrop}>
+                    Skip remaining crops
+                  </button>
+                )}
+              </p>
+              <ImageCropper
+                imageUrl={cropRawUrl}
+                onCropDone={handleCropDone}
+                onChangeImage={handleChangeImage}
+                onUseOriginal={currentCropIsFirst ? handleUseOriginal : undefined}
+                lockedAspect={lockedAspect}
+              />
             </div>
           )}
 
-          <button type="submit" className="save-button" disabled={submitting}>
+          {!isCropping && imageItems.length > 0 && (
+            <div>
+              <SortableThumbnails
+                items={thumbItems}
+                onReorder={(newOrder) => {
+                  const idMap = new Map(imageItems.map((item) => [item.id, item]));
+                  handleReorder(newOrder.map((t) => idMap.get(t.id)));
+                }}
+                onDelete={handleDeleteThumb}
+              />
+              {imageItems.length < MAX_IMAGES && (
+                <button
+                  type="button"
+                  className="cancel-button cancel-button--sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Add more images
+                </button>
+              )}
+            </div>
+          )}
+
+          <button type="submit" className="save-button" disabled={submitting || isCropping}>
             {submitting ? "Uploading..." : "Share post"}
           </button>
         </form>

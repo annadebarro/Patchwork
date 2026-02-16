@@ -348,8 +348,14 @@ function initModels(sequelize) {
       },
       imageUrl: {
         type: DataTypes.TEXT,
-        allowNull: false,
+        allowNull: true,
         field: "image_url",
+      },
+      imageUrls: {
+        type: DataTypes.ARRAY(DataTypes.TEXT),
+        allowNull: false,
+        defaultValue: [],
+        field: "image_urls",
       },
       priceCents: {
         type: DataTypes.INTEGER,
