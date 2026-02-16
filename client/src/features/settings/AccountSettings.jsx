@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../../shared/preferences/preferences";
 import SizePreferencesEditor from "./SizePreferencesEditor";
 import BrandPreferencesEditor from "./BrandPreferencesEditor";
+import ImageCropper from "../feed/ImageCropper";
 
 function AccountSettings({ user, onUpdateUser }) {
   const navigate = useNavigate();
@@ -28,6 +29,9 @@ function AccountSettings({ user, onUpdateUser }) {
   const [customBrand, setCustomBrand] = useState("");
   const [avatarFile, setAvatarFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(user?.profilePicture || null);
+  const [showCropper, setShowCropper] = useState(false);
+  const [rawPreviewUrl, setRawPreviewUrl] = useState(null);
+  const fileInputRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -55,9 +59,23 @@ function AccountSettings({ user, onUpdateUser }) {
   function handleFileChange(event) {
     const file = event.target.files[0];
     if (file) {
-      setAvatarFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      setRawPreviewUrl(URL.createObjectURL(file));
+      setShowCropper(true);
     }
+    event.target.value = "";
+  }
+
+  function handleCropDone(croppedFile) {
+    setAvatarFile(croppedFile);
+    setPreviewUrl(URL.createObjectURL(croppedFile));
+    setShowCropper(false);
+    setRawPreviewUrl(null);
+  }
+
+  function handleChangeImage() {
+    setShowCropper(false);
+    setRawPreviewUrl(null);
+    fileInputRef.current?.click();
   }
 
   async function handleSubmit(event) {
@@ -162,26 +180,38 @@ function AccountSettings({ user, onUpdateUser }) {
           <div className="settings-section">
             <h2 className="settings-section-title">Profile picture</h2>
             <div className="profile-picture-upload">
-              <div className="profile-patch profile-patch--large">
-                <div className="profile-patch-inner">
-                  {previewUrl ? (
-                    <img src={previewUrl} alt="Profile preview" className="profile-preview-img" />
-                  ) : (
-                    <span className="profile-patch-initial">
-                      {formData.name?.charAt(0).toUpperCase() || "?"}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <label className="upload-button">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  hidden
+              {showCropper && rawPreviewUrl ? (
+                <ImageCropper
+                  mode="avatar"
+                  imageUrl={rawPreviewUrl}
+                  onCropDone={handleCropDone}
+                  onChangeImage={handleChangeImage}
                 />
-                Choose photo
-              </label>
+              ) : (
+                <>
+                  <div className="profile-patch profile-patch--large">
+                    <div className="profile-patch-inner">
+                      {previewUrl ? (
+                        <img src={previewUrl} alt="Profile preview" className="profile-preview-img" />
+                      ) : (
+                        <span className="profile-patch-initial">
+                          {formData.name?.charAt(0).toUpperCase() || "?"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <label className="upload-button">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      hidden
+                    />
+                    Choose photo
+                  </label>
+                </>
+              )}
             </div>
           </div>
 
