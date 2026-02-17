@@ -8,6 +8,7 @@ import {
   getFallbackPostMetadataOptions,
   MAX_COLOR_TAGS,
   MAX_STYLE_TAGS,
+  POST_TYPES,
   removeTagValue,
   toDisplayLabel,
   UNKNOWN,
@@ -48,7 +49,9 @@ function PostDetailPage({ currentUser }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [soldBusy, setSoldBusy] = useState(false);
 
-  const [metadataOptions, setMetadataOptions] = useState(() => getFallbackPostMetadataOptions());
+  const [metadataOptions, setMetadataOptions] = useState(() =>
+    getFallbackPostMetadataOptions({ type: POST_TYPES.REGULAR })
+  );
   const [editCategory, setEditCategory] = useState(UNKNOWN);
   const [editSubcategory, setEditSubcategory] = useState(UNKNOWN);
   const [editBrand, setEditBrand] = useState("");
@@ -73,9 +76,13 @@ function PostDetailPage({ currentUser }) {
   }, [editCategory, metadataOptions]);
 
   useEffect(() => {
-    let ignore = false;
+    if (!post?.type) return;
 
-    fetchPostMetadataOptions()
+    let ignore = false;
+    const postType = post.type;
+    setMetadataOptions(getFallbackPostMetadataOptions({ type: postType }));
+
+    fetchPostMetadataOptions({ type: postType })
       .then((options) => {
         if (!ignore && options) {
           setMetadataOptions(options);
@@ -88,7 +95,7 @@ function PostDetailPage({ currentUser }) {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [post?.type]);
 
   useEffect(() => {
     if (!editSubcategoryOptions.includes(editSubcategory)) {
@@ -160,18 +167,26 @@ function PostDetailPage({ currentUser }) {
     setEditSaving(true);
     setEditError("");
     try {
+      if (
+        post.type === POST_TYPES.MARKET &&
+        (editCategory === UNKNOWN || editCondition === UNKNOWN || editSizeLabel === UNKNOWN)
+      ) {
+        setEditError("Marketplace posts require category, condition, and size.");
+        return;
+      }
+
       const payload = {
         caption: editCaption,
-        category: editCategory,
-        subcategory: editSubcategory,
         brand: editBrand,
         styleTags: editStyleTags,
         colorTags: editColorTags,
-        condition: editCondition,
-        sizeLabel: editSizeLabel,
       };
 
-      if (post.type === "market") {
+      if (post.type === POST_TYPES.MARKET) {
+        payload.category = editCategory;
+        payload.subcategory = editSubcategory;
+        payload.condition = editCondition;
+        payload.sizeLabel = editSizeLabel;
         payload.priceCents = editPrice === "" ? null : Math.round(Number(editPrice) * 100);
       }
 
@@ -254,7 +269,7 @@ function PostDetailPage({ currentUser }) {
     );
   }
 
-  const isMarket = post.type === "market";
+  const isMarket = post.type === POST_TYPES.MARKET;
   const priceLabel = isMarket && post.priceCents !== null ? formatPrice(post.priceCents) : "";
   const timestamp = post.createdAt
     ? new Date(post.createdAt).toLocaleDateString("en-US", {
@@ -267,15 +282,15 @@ function PostDetailPage({ currentUser }) {
   const styleTags = normalizeTags(post.styleTags);
   const colorTags = normalizeTags(post.colorTags);
 
-  const hasMetadata =
-    isMarket ||
-    (post.category && post.category !== UNKNOWN) ||
-    (post.subcategory && post.subcategory !== UNKNOWN) ||
-    (post.condition && post.condition !== UNKNOWN) ||
-    (post.sizeLabel && post.sizeLabel !== UNKNOWN) ||
-    !!post.brand ||
-    styleTags.length > 0 ||
-    colorTags.length > 0;
+  const hasMetadata = isMarket
+    ? (post.category && post.category !== UNKNOWN) ||
+      (post.subcategory && post.subcategory !== UNKNOWN) ||
+      (post.condition && post.condition !== UNKNOWN) ||
+      (post.sizeLabel && post.sizeLabel !== UNKNOWN) ||
+      !!post.brand ||
+      styleTags.length > 0 ||
+      colorTags.length > 0
+    : !!post.brand || styleTags.length > 0 || colorTags.length > 0;
 
   return (
     <div className="feed-content">
@@ -332,54 +347,56 @@ function PostDetailPage({ currentUser }) {
                   </label>
                 )}
 
-                <div className="post-metadata-grid">
-                  <label>
-                    Category
-                    <select value={editCategory} onChange={(event) => setEditCategory(event.target.value)}>
-                      {metadataOptions.categories.map((entry) => (
-                        <option key={entry} value={entry}>
-                          {toDisplayLabel(entry)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                {isMarket && metadataOptions?.fields?.category && (
+                  <div className="post-metadata-grid">
+                    <label>
+                      Category*
+                      <select value={editCategory} onChange={(event) => setEditCategory(event.target.value)}>
+                        {metadataOptions.categories.map((entry) => (
+                          <option key={entry} value={entry}>
+                            {toDisplayLabel(entry)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label>
-                    Subcategory
-                    <select
-                      value={editSubcategory}
-                      onChange={(event) => setEditSubcategory(event.target.value)}
-                    >
-                      {editSubcategoryOptions.map((entry) => (
-                        <option key={entry} value={entry}>
-                          {toDisplayLabel(entry)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label>
+                      Subcategory
+                      <select
+                        value={editSubcategory}
+                        onChange={(event) => setEditSubcategory(event.target.value)}
+                      >
+                        {editSubcategoryOptions.map((entry) => (
+                          <option key={entry} value={entry}>
+                            {toDisplayLabel(entry)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label>
-                    Condition
-                    <select value={editCondition} onChange={(event) => setEditCondition(event.target.value)}>
-                      {metadataOptions.conditions.map((entry) => (
-                        <option key={entry} value={entry}>
-                          {toDisplayLabel(entry)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label>
+                      Condition*
+                      <select value={editCondition} onChange={(event) => setEditCondition(event.target.value)}>
+                        {metadataOptions.conditions.map((entry) => (
+                          <option key={entry} value={entry}>
+                            {toDisplayLabel(entry)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label>
-                    Size
-                    <select value={editSizeLabel} onChange={(event) => setEditSizeLabel(event.target.value)}>
-                      {metadataOptions.sizeLabels.map((entry) => (
-                        <option key={entry} value={entry}>
-                          {toDisplayLabel(entry)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                    <label>
+                      Size*
+                      <select value={editSizeLabel} onChange={(event) => setEditSizeLabel(event.target.value)}>
+                        {metadataOptions.sizeLabels.map((entry) => (
+                          <option key={entry} value={entry}>
+                            {toDisplayLabel(entry)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
 
                 <label className="post-edit-price-label">
                   Brand
@@ -399,7 +416,7 @@ function PostDetailPage({ currentUser }) {
                 </label>
 
                 <div className="post-tag-editor">
-                  <span>Style tags</span>
+                  <span>{isMarket ? "Style tags" : "Style/Vibe tags"}</span>
                   <div className="post-tag-row">
                     <input
                       type="text"
@@ -528,32 +545,43 @@ function PostDetailPage({ currentUser }) {
 
                 {hasMetadata && (
                   <div className="post-detail-metadata">
-                    <div className="post-detail-metadata-grid">
-                      <div className="post-detail-metadata-item">
-                        <span className="post-detail-metadata-label">Category</span>
-                        <span>{toDisplayLabel(post.category || UNKNOWN)}</span>
+                    {isMarket ? (
+                      <div className="post-detail-metadata-grid">
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Category</span>
+                          <span>{toDisplayLabel(post.category || UNKNOWN)}</span>
+                        </div>
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Subcategory</span>
+                          <span>{toDisplayLabel(post.subcategory || UNKNOWN)}</span>
+                        </div>
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Condition</span>
+                          <span>{toDisplayLabel(post.condition || UNKNOWN)}</span>
+                        </div>
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Size</span>
+                          <span>{toDisplayLabel(post.sizeLabel || UNKNOWN)}</span>
+                        </div>
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Brand</span>
+                          <span>{post.brand || "Unspecified"}</span>
+                        </div>
                       </div>
-                      <div className="post-detail-metadata-item">
-                        <span className="post-detail-metadata-label">Subcategory</span>
-                        <span>{toDisplayLabel(post.subcategory || UNKNOWN)}</span>
-                      </div>
-                      <div className="post-detail-metadata-item">
-                        <span className="post-detail-metadata-label">Condition</span>
-                        <span>{toDisplayLabel(post.condition || UNKNOWN)}</span>
-                      </div>
-                      <div className="post-detail-metadata-item">
-                        <span className="post-detail-metadata-label">Size</span>
-                        <span>{toDisplayLabel(post.sizeLabel || UNKNOWN)}</span>
-                      </div>
-                      <div className="post-detail-metadata-item">
-                        <span className="post-detail-metadata-label">Brand</span>
-                        <span>{post.brand || "Unspecified"}</span>
-                      </div>
-                    </div>
+                    ) : (
+                      !!post.brand && (
+                        <div className="post-detail-metadata-item">
+                          <span className="post-detail-metadata-label">Brand</span>
+                          <span>{post.brand}</span>
+                        </div>
+                      )
+                    )}
 
                     {styleTags.length > 0 && (
                       <div>
-                        <span className="post-detail-metadata-label">Style tags</span>
+                        <span className="post-detail-metadata-label">
+                          {isMarket ? "Style tags" : "Style/Vibe tags"}
+                        </span>
                         <div className="post-detail-tag-list">
                           {styleTags.map((tag) => (
                             <span key={tag} className="post-detail-tag">

@@ -98,8 +98,15 @@ router.get("/mine", authMiddleware, async (req, res) => {
   }
 });
 
-router.get("/metadata/options", (_req, res) => {
-  return res.json(getPostMetadataOptions());
+router.get("/metadata/options", (req, res) => {
+  const rawType = req.query.type;
+  const type = rawType ? normalizeType(rawType) : null;
+
+  if (rawType && !type) {
+    return res.status(400).json({ message: "Type must be either 'regular' or 'market'." });
+  }
+
+  return res.json(getPostMetadataOptions({ postType: type }));
 });
 
 router.post("/", authMiddleware, async (req, res) => {
@@ -135,7 +142,10 @@ router.post("/", authMiddleware, async (req, res) => {
 
   const normalizedIsPublic =
     typeof isPublic === "boolean" ? isPublic : isPublic === undefined ? true : Boolean(isPublic);
-  const normalizedMetadata = normalizeAndValidatePostMetadata(req.body || {}, { mode: "create" });
+  const normalizedMetadata = normalizeAndValidatePostMetadata(req.body || {}, {
+    mode: "create",
+    postType: normalizedType,
+  });
   if (normalizedMetadata.error) {
     return res.status(400).json({ message: normalizedMetadata.error });
   }
@@ -241,6 +251,7 @@ router.patch("/:postId", authMiddleware, async (req, res) => {
     if (hasPostMetadataFields(req.body)) {
       const normalizedMetadata = normalizeAndValidatePostMetadata(req.body, {
         mode: "patch",
+        postType: post.type,
         current: getPostMetadataFromPost(post),
       });
 
