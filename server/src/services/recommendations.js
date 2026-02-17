@@ -22,7 +22,7 @@ function normalizeRecommendationType(rawType) {
 function parseRecommendationPaging(query) {
   return {
     limit: clamp(toInt(query?.limit, DEFAULT_LIMIT), 1, MAX_LIMIT),
-    offset: clamp(toInt(query?.offset, 0), 0, 1000),
+    offset: clamp(toInt(query?.offset, 0), 0, 10000),
   };
 }
 
@@ -31,10 +31,10 @@ async function fetchChronologicalRecommendations({ models, type, limit, offset }
   const where = { isPublic: true };
   if (type) where.type = type;
 
-  return models.Post.findAll({
+  const rows = await models.Post.findAll({
     where,
     order: [["createdAt", "DESC"]],
-    limit,
+    limit: limit + 1,
     offset,
     include: [
       {
@@ -44,6 +44,11 @@ async function fetchChronologicalRecommendations({ models, type, limit, offset }
       },
     ],
   });
+
+  return {
+    posts: rows.slice(0, limit),
+    hasMore: rows.length > limit,
+  };
 }
 
 module.exports = {

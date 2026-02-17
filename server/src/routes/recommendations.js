@@ -45,7 +45,7 @@ router.get("/", authMiddleware, async (req, res) => {
 
   try {
     const models = getModels();
-    const posts = await fetchChronologicalRecommendations({
+    const result = await fetchChronologicalRecommendations({
       models,
       type,
       limit,
@@ -57,10 +57,12 @@ router.get("/", authMiddleware, async (req, res) => {
       algorithm: "chronological_fallback",
       personalized: false,
       requestId,
-      posts,
+      posts: result.posts,
       pagination: {
         limit,
         offset,
+        hasMore: result.hasMore,
+        nextOffset: result.hasMore ? offset + result.posts.length : null,
       },
     });
   } catch (err) {

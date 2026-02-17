@@ -25,6 +25,7 @@ function signToken(user) {
       email: user.email,
       username: user.username,
       name: user.name,
+      role: user.role || "user",
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -103,6 +104,7 @@ function serializeUser(user) {
     email: user.email,
     username: user.username,
     name: user.name,
+    role: user.role || "user",
     bio: typeof user.bio === "string" ? user.bio : "",
     sizePreferences: normalizeStoredSizePreferences(user.sizePreferences),
     favoriteBrands,
@@ -389,6 +391,7 @@ router.get("/me", authMiddleware, async (req, res) => {
         "email",
         "username",
         "name",
+        "role",
         "bio",
         "sizePreferences",
         "favoriteBrands",
@@ -407,6 +410,10 @@ router.get("/me", authMiddleware, async (req, res) => {
 
 router.patch("/me", authMiddleware, async (req, res) => {
   const { name, username, bio, sizePreferences, favoriteBrands, profilePicture } = req.body || {};
+
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, "role")) {
+    return res.status(400).json({ message: "Role cannot be changed through this endpoint." });
+  }
 
   try {
     const { User } = getModels();

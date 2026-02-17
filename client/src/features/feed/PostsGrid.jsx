@@ -9,6 +9,7 @@ import PostCard from "./PostCard";
 const TELEMETRY_FLUSH_DELAY_MS = 1500;
 const TELEMETRY_BATCH_SIZE = 20;
 const MIN_DWELL_MS = 300;
+const PAGE_SIZE = 30;
 
 function normalizeRankPosition(value) {
   const parsed = Number(value);
@@ -20,7 +21,11 @@ function normalizeRankPosition(value) {
 function PostsGrid({ type, refreshKey }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const [error, setError] = useState("");
+  const [loadMoreError, setLoadMoreError] = useState("");
   const [algorithm, setAlgorithm] = useState("chronological_fallback");
   const [requestId, setRequestId] = useState(null);
   const telemetryQueueRef = useRef([]);
@@ -136,6 +141,19 @@ function PostsGrid({ type, refreshKey }) {
     );
   }, [buildFeedEvent, sendTelemetryEvents]);
 
+  const mergePosts = useCallback((existing, incoming) => {
+    if (!Array.isArray(incoming) || incoming.length === 0) return existing;
+
+    const seen = new Set(existing.map((post) => post.id));
+    const merged = [...existing];
+    for (const post of incoming) {
+      if (!post?.id || seen.has(post.id)) continue;
+      seen.add(post.id);
+      merged.push(post);
+    }
+    return merged;
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -154,6 +172,8 @@ function PostsGrid({ type, refreshKey }) {
 
         const params = new URLSearchParams();
         if (type) params.set("type", type);
+        params.set("limit", String(PAGE_SIZE));
+        params.set("offset", "0");
         const res = await apiFetch(`/recommendations?${params.toString()}`, {
           auth: true,
           surface: REQUEST_SURFACES.SOCIAL_FEED,
@@ -163,9 +183,15 @@ function PostsGrid({ type, refreshKey }) {
           const message = data?.message || `Failed to load posts (${res.status})`;
           if (isMounted) setError(message);
         } else if (isMounted) {
-          setPosts(Array.isArray(data?.posts) ? data.posts : []);
+          const items = Array.isArray(data?.posts) ? data.posts : [];
+          setPosts(items);
           setAlgorithm(typeof data?.algorithm === "string" ? data.algorithm : "chronological_fallback");
           setRequestId(typeof data?.requestId === "string" ? data.requestId : null);
+          setHasMore(Boolean(data?.pagination?.hasMore));
+          setNextOffset(
+            Number.isFinite(data?.pagination?.nextOffset) ? data.pagination.nextOffset : items.length
+          );
+          setLoadMoreError("");
         }
       } catch {
         if (isMounted) setError("Network error while loading posts.");
@@ -180,6 +206,44 @@ function PostsGrid({ type, refreshKey }) {
       isMounted = false;
     };
   }, [type, refreshKey]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore) return;
+
+    setLoadingMore(true);
+    setLoadMoreError("");
+
+    try {
+      const params = new URLSearchParams();
+      if (type) params.set("type", type);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(nextOffset));
+
+      const res = await apiFetch(`/recommendations?${params.toString()}`, {
+        auth: true,
+        surface: REQUEST_SURFACES.SOCIAL_FEED,
+      });
+      const data = await parseApiResponse(res);
+      if (!res.ok) {
+        throw new Error(data?.message || `Failed to load more posts (${res.status})`);
+      }
+
+      const items = Array.isArray(data?.posts) ? data.posts : [];
+      setPosts((prev) => mergePosts(prev, items));
+      setAlgorithm(typeof data?.algorithm === "string" ? data.algorithm : "chronological_fallback");
+      setRequestId(typeof data?.requestId === "string" ? data.requestId : null);
+      setHasMore(Boolean(data?.pagination?.hasMore));
+      setNextOffset(
+        Number.isFinite(data?.pagination?.nextOffset)
+          ? data.pagination.nextOffset
+          : nextOffset + items.length
+      );
+    } catch (err) {
+      setLoadMoreError(err?.message || "Failed to load more posts.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loading, loadingMore, mergePosts, nextOffset, type]);
 
   useEffect(() => {
     function onPageHide() {
@@ -215,23 +279,40 @@ function PostsGrid({ type, refreshKey }) {
   }
 
   return (
-    <div className="masonry-grid">
-      {posts.map((post, index) => (
-        <PostCard
-          key={post.id}
-          post={post}
-          rankPosition={index + 1}
-          feedContext={{
-            feedType,
-            algorithm,
-            requestId,
-          }}
-          onFeedImpression={handleFeedImpression}
-          onFeedDwell={handleFeedDwell}
-          onFeedClick={handleFeedClick}
-        />
-      ))}
-    </div>
+    <>
+      <div className="masonry-grid">
+        {posts.map((post, index) => (
+          <PostCard
+            key={post.id}
+            post={post}
+            rankPosition={index + 1}
+            feedContext={{
+              feedType,
+              algorithm,
+              requestId,
+            }}
+            onFeedImpression={handleFeedImpression}
+            onFeedDwell={handleFeedDwell}
+            onFeedClick={handleFeedClick}
+          />
+        ))}
+      </div>
+      {(hasMore || loadMoreError) && (
+        <div className="feed-load-more">
+          {loadMoreError && <p className="error">{loadMoreError}</p>}
+          {hasMore && (
+            <button
+              type="button"
+              className="save-button save-button--sm"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </button>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

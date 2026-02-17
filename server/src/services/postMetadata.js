@@ -1,10 +1,15 @@
-const TAXONOMY_VERSION = "post-metadata-v1";
+const TAXONOMY_VERSION = "post-metadata-v2";
 const UNKNOWN = "unknown";
 const MAX_BRAND_LENGTH = 50;
 const MAX_STYLE_TAGS = 8;
 const MAX_COLOR_TAGS = 6;
 const MIN_TAG_LENGTH = 2;
 const MAX_TAG_LENGTH = 24;
+
+const POST_TYPES = Object.freeze({
+  REGULAR: "regular",
+  MARKET: "market",
+});
 
 const SUBCATEGORIES_BY_CATEGORY = Object.freeze({
   unknown: [UNKNOWN],
@@ -119,6 +124,20 @@ const SUGGESTED_BRANDS = Object.freeze([
   "Urban Outfitters",
 ]);
 
+const PROFILE_FIELDS = Object.freeze({
+  [POST_TYPES.REGULAR]: Object.freeze(["brand", "styleTags", "colorTags"]),
+  [POST_TYPES.MARKET]: Object.freeze([
+    "category",
+    "subcategory",
+    "brand",
+    "styleTags",
+    "colorTags",
+    "condition",
+    "sizeLabel",
+  ]),
+});
+
+const MARKET_REQUIRED_FIELDS = Object.freeze(["category", "condition", "sizeLabel"]);
 const CONTROLLED_FIELDS = new Set(["category", "subcategory", "condition", "sizeLabel"]);
 const ALL_FIELDS = new Set([
   "category",
@@ -134,6 +153,15 @@ const categorySet = new Set(CATEGORIES);
 const conditionSet = new Set(CONDITIONS);
 const sizeLabelSet = new Set(SIZE_LABELS);
 const suggestedBrandMap = new Map(SUGGESTED_BRANDS.map((brand) => [brand.toLowerCase(), brand]));
+
+function normalizePostType(rawType) {
+  if (typeof rawType !== "string") return null;
+  const normalized = rawType.trim().toLowerCase();
+  if (normalized === POST_TYPES.REGULAR || normalized === POST_TYPES.MARKET) {
+    return normalized;
+  }
+  return null;
+}
 
 function defaultPostMetadata() {
   return {
@@ -244,14 +272,29 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function ensureMarketRequiredFields(value) {
+  for (const field of MARKET_REQUIRED_FIELDS) {
+    if (value[field] === UNKNOWN) {
+      return { error: `${field} is required for market posts.` };
+    }
+  }
+  return null;
+}
+
 function normalizeAndValidatePostMetadata(input, options = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { error: "Post metadata payload must be an object." };
   }
 
+  const postType = normalizePostType(options.postType) || POST_TYPES.REGULAR;
+  if (!postType) {
+    return { error: "Post type must be either 'regular' or 'market'." };
+  }
+
   const mode = options.mode === "patch" ? "patch" : "create";
   const current = mode === "patch" ? { ...defaultPostMetadata(), ...(options.current || {}) } : null;
   const value = mode === "patch" ? { ...current } : defaultPostMetadata();
+  const allowedFields = new Set(PROFILE_FIELDS[postType] || []);
 
   const fieldProvided = {
     category: hasOwn(input, "category"),
@@ -262,6 +305,15 @@ function normalizeAndValidatePostMetadata(input, options = {}) {
     condition: hasOwn(input, "condition"),
     sizeLabel: hasOwn(input, "sizeLabel"),
   };
+
+  const disallowedFields = Object.keys(fieldProvided).filter(
+    (field) => fieldProvided[field] && !allowedFields.has(field)
+  );
+  if (disallowedFields.length > 0) {
+    return {
+      error: `${disallowedFields.join(", ")} cannot be set for ${postType} posts.`,
+    };
+  }
 
   if (fieldProvided.category) {
     const normalized = normalizeControlledValue(input.category, categorySet, "category");
@@ -311,6 +363,15 @@ function normalizeAndValidatePostMetadata(input, options = {}) {
     value.sizeLabel = normalized.value;
   }
 
+  if (postType === POST_TYPES.REGULAR) {
+    // Keep regular posts tag-first and non-clothing-centric.
+    value.category = UNKNOWN;
+    value.subcategory = UNKNOWN;
+    value.condition = UNKNOWN;
+    value.sizeLabel = UNKNOWN;
+    return { value };
+  }
+
   const allowedSubcategories = new Set(SUBCATEGORIES_BY_CATEGORY[value.category] || [UNKNOWN]);
   if (!allowedSubcategories.has(value.subcategory)) {
     const changedCategory =
@@ -319,30 +380,92 @@ function normalizeAndValidatePostMetadata(input, options = {}) {
     if (changedCategory) {
       value.subcategory = UNKNOWN;
     } else {
-      return { error: `subcategory is invalid for category \"${value.category}\".` };
+      return { error: `subcategory is invalid for category "${value.category}".` };
     }
   }
+
+  const marketRequiredError = ensureMarketRequiredFields(value);
+  if (marketRequiredError) return marketRequiredError;
 
   return { value };
 }
 
-function getPostMetadataOptions() {
+const REGULAR_PROFILE_OPTIONS = Object.freeze({
+  fields: Object.freeze({
+    brand: true,
+    styleTags: true,
+    colorTags: true,
+  }),
+  requiredFields: Object.freeze([]),
+  suggestedBrands: SUGGESTED_BRANDS,
+  suggestedStyleTags: SUGGESTED_STYLE_TAGS,
+  suggestedColorTags: SUGGESTED_COLOR_TAGS,
+});
+
+const MARKET_PROFILE_OPTIONS = Object.freeze({
+  fields: Object.freeze({
+    category: true,
+    subcategory: true,
+    condition: true,
+    sizeLabel: true,
+    brand: true,
+    styleTags: true,
+    colorTags: true,
+  }),
+  requiredFields: MARKET_REQUIRED_FIELDS,
+  categories: CATEGORIES,
+  subcategoriesByCategory: SUBCATEGORIES_BY_CATEGORY,
+  conditions: CONDITIONS,
+  sizeLabels: SIZE_LABELS,
+  suggestedBrands: SUGGESTED_BRANDS,
+  suggestedStyleTags: SUGGESTED_STYLE_TAGS,
+  suggestedColorTags: SUGGESTED_COLOR_TAGS,
+});
+
+function getPostMetadataOptions(options = {}) {
+  const postType = normalizePostType(options.postType || options.type);
+  const limits = {
+    brandMaxLength: MAX_BRAND_LENGTH,
+    styleTagsMaxCount: MAX_STYLE_TAGS,
+    colorTagsMaxCount: MAX_COLOR_TAGS,
+    tagMinLength: MIN_TAG_LENGTH,
+    tagMaxLength: MAX_TAG_LENGTH,
+  };
+
+  if (postType === POST_TYPES.REGULAR) {
+    return {
+      version: TAXONOMY_VERSION,
+      postType,
+      ...REGULAR_PROFILE_OPTIONS,
+      limits,
+    };
+  }
+
+  if (postType === POST_TYPES.MARKET) {
+    return {
+      version: TAXONOMY_VERSION,
+      postType,
+      ...MARKET_PROFILE_OPTIONS,
+      limits,
+    };
+  }
+
   return {
     version: TAXONOMY_VERSION,
-    categories: CATEGORIES,
-    subcategoriesByCategory: SUBCATEGORIES_BY_CATEGORY,
-    conditions: CONDITIONS,
-    sizeLabels: SIZE_LABELS,
-    suggestedBrands: SUGGESTED_BRANDS,
-    suggestedStyleTags: SUGGESTED_STYLE_TAGS,
-    suggestedColorTags: SUGGESTED_COLOR_TAGS,
-    limits: {
-      brandMaxLength: MAX_BRAND_LENGTH,
-      styleTagsMaxCount: MAX_STYLE_TAGS,
-      colorTagsMaxCount: MAX_COLOR_TAGS,
-      tagMinLength: MIN_TAG_LENGTH,
-      tagMaxLength: MAX_TAG_LENGTH,
+    postTypes: [POST_TYPES.REGULAR, POST_TYPES.MARKET],
+    profiles: {
+      [POST_TYPES.REGULAR]: {
+        ...REGULAR_PROFILE_OPTIONS,
+        limits,
+      },
+      [POST_TYPES.MARKET]: {
+        ...MARKET_PROFILE_OPTIONS,
+        limits,
+      },
     },
+    // Backward-compatible top-level fields for older clients.
+    ...MARKET_PROFILE_OPTIONS,
+    limits,
   };
 }
 
@@ -376,11 +499,13 @@ function hasPostMetadataFields(input) {
 
 module.exports = {
   CONTROLLED_FIELDS,
+  POST_TYPES,
   UNKNOWN,
   defaultPostMetadata,
   getPostMetadataFromPost,
   getPostMetadataOptions,
   hasPostMetadataFields,
   normalizeAndValidatePostMetadata,
+  normalizePostType,
   normalizeTagToken,
 };

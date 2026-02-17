@@ -11,6 +11,7 @@ const notificationsRouter = require("./notifications");
 const messagesRouter = require("./messages");
 const searchRouter = require("./search");
 const recommendationsRouter = require("./recommendations");
+const adminRouter = require("./admin");
 
 function registerRoutes(app) {
   app.use("/api/health", healthRouter);
@@ -26,6 +27,7 @@ function registerRoutes(app) {
   app.use("/api/messages", messagesRouter);
   app.use("/api/search", searchRouter);
   app.use("/api/recommendations", recommendationsRouter);
+  app.use("/api/admin", adminRouter);
 }
 
 module.exports = { registerRoutes };
