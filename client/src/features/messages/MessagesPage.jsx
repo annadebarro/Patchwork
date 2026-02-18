@@ -22,6 +22,7 @@ function MessagesPage({ currentUser }) {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [convoDetail, setConvoDetail] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [linkedPost, setLinkedPost] = useState(null);
   const [markingComplete, setMarkingComplete] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingTarget, setRatingTarget] = useState(null);
@@ -176,6 +177,7 @@ function MessagesPage({ currentUser }) {
     if (!activeConvoId) {
       setMessages([]);
       setConvoDetail(null);
+      setLinkedPost(null);
       return;
     }
 
@@ -193,6 +195,7 @@ function MessagesPage({ currentUser }) {
           setMessages(Array.isArray(data?.messages) ? data.messages : []);
           const convo = data?.conversation || null;
           setConvoDetail(convo);
+          setLinkedPost(data?.linkedPost || null);
 
           // If navigated from a "deal complete" notification, show the rating modal
           if (showRatingAfterLoadRef.current && convo?.dealStatus === "completed") {
@@ -534,6 +537,40 @@ function MessagesPage({ currentUser }) {
                   <span className="deal-complete-badge">Deal complete</span>
                 )}
               </div>
+              {linkedPost && (
+                <button
+                  type="button"
+                  className="chat-linked-post"
+                  onClick={() => navigate(`/post/${linkedPost.id}`)}
+                >
+                  {(linkedPost.imageUrls?.[0] || linkedPost.imageUrl) && (
+                    <img
+                      src={linkedPost.imageUrls?.[0] || linkedPost.imageUrl}
+                      alt="Listed item"
+                      className="chat-linked-post-img"
+                    />
+                  )}
+                  <div className="chat-linked-post-info">
+                    <span className="chat-linked-post-label">Listed item</span>
+                    {linkedPost.caption && (
+                      <span className="chat-linked-post-caption">
+                        {linkedPost.caption.length > 60
+                          ? linkedPost.caption.slice(0, 60) + "…"
+                          : linkedPost.caption}
+                      </span>
+                    )}
+                    {linkedPost.priceCents != null && (
+                      <span className="chat-linked-post-price">
+                        ${(linkedPost.priceCents / 100).toFixed(2)}
+                        {linkedPost.isSold && <span className="chat-linked-post-sold"> · Sold</span>}
+                      </span>
+                    )}
+                  </div>
+                  <svg className="chat-linked-post-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              )}
               <div className="chat-messages">
                 {msgLoading ? (
                   <p className="comment-empty">Loading messages...</p>

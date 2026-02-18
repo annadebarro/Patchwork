@@ -90,7 +90,7 @@ router.post("/conversations", authMiddleware, async (req, res) => {
         convMap[p.conversationId].add(p.userId);
       }
 
-      // Find a conversation with exactly these 2 participants
+      // Find a conversation with exactly these 2 participants that isn't completed
       for (const [convId, members] of Object.entries(convMap)) {
         if (members.size === 2 && allIds.every((id) => members.has(id))) {
           // Verify no extra active participants
@@ -98,6 +98,12 @@ router.post("/conversations", authMiddleware, async (req, res) => {
             where: { conversationId: convId, leftAt: null },
           });
           if (totalCount === 2) {
+            // Don't reuse a completed deal conversation — create a new one instead
+            const candidate = await Conversation.findByPk(convId, {
+              attributes: ["id", "dealStatus"],
+            });
+            if (candidate?.dealStatus === "completed") continue;
+
             const existing = await Conversation.findByPk(convId, {
               include: [
                 {
@@ -161,7 +167,7 @@ router.post("/conversations", authMiddleware, async (req, res) => {
 
 // GET /conversations/:id — get conversation detail with messages
 router.get("/conversations/:id", authMiddleware, async (req, res) => {
-  const { Conversation, ConversationParticipant, Message, User } = getModels();
+  const { Conversation, ConversationParticipant, Message, User, Post } = getModels();
   const { id } = req.params;
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
@@ -211,7 +217,14 @@ router.get("/conversations/:id", authMiddleware, async (req, res) => {
 
     const totalMessages = await Message.count({ where: { conversationId: id } });
 
-    return res.json({ conversation, messages, totalMessages });
+    let linkedPost = null;
+    if (conversation.linkedPostId) {
+      linkedPost = await Post.findByPk(conversation.linkedPostId, {
+        attributes: ["id", "imageUrl", "imageUrls", "priceCents", "caption", "isSold"],
+      });
+    }
+
+    return res.json({ conversation, messages, totalMessages, linkedPost });
   } catch (err) {
     console.error("Conversation detail failed:", err);
     return res.status(500).json({ message: "Failed to fetch conversation." });

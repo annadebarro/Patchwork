@@ -4099,6 +4099,76 @@ button:disabled {
 }
 
 /* ── Deal complete button ── */
+/* ── Linked post preview banner ── */
+.chat-linked-post {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: none;
+  border-bottom: 2px dashed var(--stitch);
+  background: var(--cream);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s;
+}
+
+.chat-linked-post:hover {
+  background: #f0ede6;
+}
+
+.chat-linked-post-img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border: 2px solid var(--denim-wash);
+  flex-shrink: 0;
+}
+
+.chat-linked-post-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-linked-post-label {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.65rem;
+  color: var(--denim-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chat-linked-post-caption {
+  font-size: 0.82rem;
+  color: var(--denim-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-linked-post-price {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--rust);
+}
+
+.chat-linked-post-sold {
+  font-weight: 400;
+  color: var(--denim-light);
+}
+
+.chat-linked-post-arrow {
+  width: 16px;
+  height: 16px;
+  color: var(--denim-light);
+  flex-shrink: 0;
+}
+
 .deal-complete-btn {
   font-family: 'Courier Prime', monospace;
   font-size: 0.78rem;
