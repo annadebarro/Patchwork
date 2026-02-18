@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-function SortableThumb({ id, url, onDelete, canDelete }) {
+function SortableThumb({ id, url, onDelete, canDelete, onCrop }) {
   const {
     attributes,
     listeners,
@@ -33,6 +33,22 @@ function SortableThumb({ id, url, onDelete, canDelete }) {
   return (
     <div ref={setNodeRef} style={style} className="sortable-thumb" {...attributes} {...listeners}>
       <img src={url} alt="" />
+      {onCrop && (
+        <button
+          type="button"
+          className="sortable-thumb-crop"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCrop(id);
+          }}
+          title="Crop"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="14" height="14">
+            <path d="M6 2v14h14" />
+            <path d="M18 22V8H4" />
+          </svg>
+        </button>
+      )}
       {canDelete && (
         <button
           type="button"
@@ -49,7 +65,7 @@ function SortableThumb({ id, url, onDelete, canDelete }) {
   );
 }
 
-function SortableThumbnails({ items, onReorder, onDelete, minItems = 1 }) {
+function SortableThumbnails({ items, onReorder, onDelete, onCrop, minItems = 1 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
@@ -77,6 +93,7 @@ function SortableThumbnails({ items, onReorder, onDelete, minItems = 1 }) {
               url={item.url}
               onDelete={onDelete}
               canDelete={canDelete}
+              onCrop={onCrop}
             />
           ))}
         </div>

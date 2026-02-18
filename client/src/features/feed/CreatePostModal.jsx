@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   parseApiResponse,
@@ -29,12 +29,11 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
 
   // Multi-image state
-  // Each item: { id, file (cropped or original), previewUrl }
+  // Each item: { id, file, previewUrl }
   const [imageItems, setImageItems] = useState([]);
-  // Cropping queue: raw files waiting to be cropped
-  const [cropQueue, setCropQueue] = useState([]);
+  // Optional single-image crop: id of item being cropped, or null
+  const [cropTargetId, setCropTargetId] = useState(null);
   const [cropRawUrl, setCropRawUrl] = useState("");
-  const [firstImageAspect, setFirstImageAspect] = useState(null);
   const fileInputRef = useRef(null);
 
   const [metadataOptions, setMetadataOptions] = useState(() =>
@@ -51,7 +50,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   const [colorTagInput, setColorTagInput] = useState("");
   const [showDetails, setShowDetails] = useState(false);
 
-  const isCropping = cropQueue.length > 0 && cropRawUrl;
+  const isCropping = cropTargetId !== null && cropRawUrl;
   const isMarket = type === POST_TYPES.MARKET;
   const supportsCategory = Boolean(metadataOptions?.fields?.category);
 
@@ -68,10 +67,9 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       // Revoke all preview URLs
       imageItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setImageItems([]);
-      setCropQueue([]);
+      setCropTargetId(null);
       if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
       setCropRawUrl("");
-      setFirstImageAspect(null);
       setError("");
       setMetadataOptions(getFallbackPostMetadataOptions({ type: POST_TYPES.REGULAR }));
       setCategory(UNKNOWN);
@@ -111,16 +109,6 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
     }
   }, [subcategory, subcategoryOptions]);
 
-  // Start cropping the next file in the queue
-  const startNextCrop = useCallback((queue) => {
-    if (queue.length === 0) {
-      setCropRawUrl("");
-      return;
-    }
-    const rawFile = queue[0];
-    setCropRawUrl(URL.createObjectURL(rawFile));
-  }, []);
-
   function handleFileChange(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
@@ -137,107 +125,59 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
       setError(`Only ${slotsLeft} more image${slotsLeft === 1 ? "" : "s"} can be added (max ${MAX_IMAGES}).`);
     }
 
-    setCropQueue(toAdd);
-    startNextCrop(toAdd);
+    // Add files directly as originals (no mandatory crop)
+    const newItems = toAdd.map((file) => ({
+      id: `thumb-${nextThumbId++}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+    setImageItems((prev) => [...prev, ...newItems]);
+  }
+
+  function handleStartCrop(id) {
+    const item = imageItems.find((i) => i.id === id);
+    if (!item) return;
+    setCropTargetId(id);
+    setCropRawUrl(URL.createObjectURL(item.file));
   }
 
   function handleCropDone(croppedFile) {
     const previewUrl = URL.createObjectURL(croppedFile);
-    const id = `thumb-${nextThumbId++}`;
-
-    // If this is the first image overall, record its aspect for locking subsequent crops
-    const isFirstImage = imageItems.length === 0 && cropQueue.length === cropQueue.length; // always first of this batch if no items yet
-    if (imageItems.length === 0 && firstImageAspect === null) {
-      // Detect aspect from cropped file
-      const img = new Image();
-      img.onload = () => {
-        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
-        URL.revokeObjectURL(img.src);
-      };
-      img.src = previewUrl;
-    }
-
-    setImageItems((prev) => [...prev, { id, file: croppedFile, previewUrl }]);
-
-    // Advance crop queue
+    setImageItems((prev) =>
+      prev.map((item) => {
+        if (item.id === cropTargetId) {
+          URL.revokeObjectURL(item.previewUrl);
+          return { ...item, file: croppedFile, previewUrl };
+        }
+        return item;
+      })
+    );
     if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
-    const remaining = cropQueue.slice(1);
-    setCropQueue(remaining);
-    startNextCrop(remaining);
-  }
-
-  function handleUseOriginal() {
-    const rawFile = cropQueue[0];
-    if (!rawFile) return;
-
-    const previewUrl = cropRawUrl; // reuse the blob URL
-    const id = `thumb-${nextThumbId++}`;
-
-    if (imageItems.length === 0 && firstImageAspect === null) {
-      const img = new Image();
-      img.onload = () => {
-        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
-      };
-      img.src = previewUrl;
-    }
-
-    setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl }]);
-
-    const remaining = cropQueue.slice(1);
-    setCropQueue(remaining);
     setCropRawUrl("");
-    startNextCrop(remaining);
+    setCropTargetId(null);
   }
 
-  function handleChangeImage() {
-    // Skip current crop, discard this file
+  function handleCancelCrop() {
     if (cropRawUrl) URL.revokeObjectURL(cropRawUrl);
-    const remaining = cropQueue.slice(1);
-    setCropQueue(remaining);
-    startNextCrop(remaining);
-  }
-
-  function handleSkipCrop() {
-    // Skip remaining crop queue entirely, use originals
-    cropQueue.forEach((rawFile, i) => {
-      if (i === 0 && cropRawUrl) {
-        // First one already has a URL
-        const id = `thumb-${nextThumbId++}`;
-        setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl: cropRawUrl }]);
-      } else {
-        const url = URL.createObjectURL(rawFile);
-        const id = `thumb-${nextThumbId++}`;
-        setImageItems((prev) => [...prev, { id, file: rawFile, previewUrl: url }]);
-      }
-    });
-    setCropQueue([]);
     setCropRawUrl("");
+    setCropTargetId(null);
   }
 
   function handleReorder(newItems) {
     setImageItems(newItems);
-    // If order changed, update firstImageAspect from the new first image
-    if (newItems.length > 0) {
-      const img = new Image();
-      img.onload = () => {
-        setFirstImageAspect(img.naturalWidth / img.naturalHeight);
-        URL.revokeObjectURL(img.src);
-      };
-      img.src = URL.createObjectURL(newItems[0].file);
-    }
   }
 
   function handleDeleteThumb(id) {
-    setImageItems((prev) => {
-      const filtered = prev.filter((item) => {
+    if (cropTargetId === id) handleCancelCrop();
+    setImageItems((prev) =>
+      prev.filter((item) => {
         if (item.id === id) {
           URL.revokeObjectURL(item.previewUrl);
           return false;
         }
         return true;
-      });
-      return filtered;
-    });
+      })
+    );
   }
 
   function addStyleTag(rawTag) {
@@ -360,10 +300,6 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
   }
 
   if (!isOpen) return null;
-
-  // Determine locked aspect for 2nd+ images
-  const currentCropIsFirst = imageItems.length === 0;
-  const lockedAspect = currentCropIsFirst ? null : firstImageAspect;
 
   const thumbItems = imageItems.map((item) => ({
     id: item.id,
@@ -628,20 +564,12 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
 
           {isCropping && (
             <div>
-              <p className="field-note">
-                Cropping image {imageItems.length + 1} of {imageItems.length + cropQueue.length}
-                {cropQueue.length > 1 && (
-                  <button type="button" className="cancel-button cancel-button--sm" style={{ marginLeft: 8 }} onClick={handleSkipCrop}>
-                    Skip remaining crops
-                  </button>
-                )}
-              </p>
+              <p className="field-note">Crop image</p>
               <ImageCropper
                 imageUrl={cropRawUrl}
                 onCropDone={handleCropDone}
-                onChangeImage={handleChangeImage}
-                onUseOriginal={currentCropIsFirst ? handleUseOriginal : undefined}
-                lockedAspect={lockedAspect}
+                onChangeImage={handleCancelCrop}
+                onUseOriginal={handleCancelCrop}
               />
             </div>
           )}
@@ -655,6 +583,7 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
                   handleReorder(newOrder.map((t) => idMap.get(t.id)));
                 }}
                 onDelete={handleDeleteThumb}
+                onCrop={handleStartCrop}
               />
               {imageItems.length < MAX_IMAGES && (
                 <button

@@ -4,6 +4,7 @@ import getCroppedImg from "../../shared/utils/getCroppedImg";
 
 // Each ratio pair: [portrait, landscape]. We pick the orientation that suits the image.
 const RATIO_PAIRS = [
+  { portrait: { label: "1:1", value: 1 }, landscape: { label: "1:1", value: 1 } },
   { portrait: { label: "4:5", value: 4 / 5 }, landscape: { label: "5:4", value: 5 / 4 } },
   { portrait: { label: "2:3", value: 2 / 3 }, landscape: { label: "3:2", value: 3 / 2 } },
   { portrait: { label: "5:7", value: 5 / 7 }, landscape: { label: "7:5", value: 7 / 5 } },
