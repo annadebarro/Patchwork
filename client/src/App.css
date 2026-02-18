@@ -3395,7 +3395,9 @@ button:disabled {
 }
 
 /* ===== SOLD BADGE & OVERLAY ===== */
-.post-card--sold img {
+.post-card--sold img,
+.post-card--sold .image-carousel-single,
+.post-card--sold .image-carousel-slide img {
   filter: saturate(0.3) brightness(0.85);
 }
 
