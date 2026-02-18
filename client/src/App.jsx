@@ -191,6 +191,9 @@ function App() {
   const [promptSaving, setPromptSaving] = useState(false);
   const [promptError, setPromptError] = useState("");
 
+  const forceLoading = location.search.includes("loading=1") || location.search.includes("loading=2");
+  const showNeedleLoader = location.search.includes("loading=2");
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -355,10 +358,52 @@ function App() {
     }
   }
 
-  if (checkingAuth) {
+  if (checkingAuth || forceLoading) {
     return (
       <div className="loading-container">
         <div className="loading-card">
+          {showNeedleLoader ? (
+            <div className="loading-stitch loading-stitch--needle" aria-hidden="true">
+              <div className="needle-loader">
+                <div className="needle-blanket">
+                  <div className="blanket-patch blanket-patch--1" />
+                  <div className="blanket-patch blanket-patch--2" />
+                  <div className="blanket-patch blanket-patch--3" />
+                  <div className="blanket-patch blanket-patch--4" />
+                </div>
+                <svg className="blanket-thread" viewBox="0 0 240 40" aria-hidden="true">
+                  <path d="M10 20 C25 6, 40 34, 55 20 C70 6, 85 34, 100 20 C115 6, 130 34, 145 20 C160 6, 175 34, 190 20 C205 6, 220 34, 235 20" />
+                </svg>
+                <div className="needle-sew">
+                  <div className="needle-sew__motion">
+                    <div className="needle-sew__img" />
+                    <svg className="needle-sew__thread" viewBox="0 0 220 80">
+                      <path d="M10 40 C60 20, 120 60, 210 40" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="loading-stitch" aria-hidden="true">
+              <div className="loading-cat">
+                <div className="cat-patch cat-body" />
+                <div className="cat-patch cat-head" />
+                <div className="cat-ear cat-ear--left" />
+                <div className="cat-ear cat-ear--right" />
+                <div className="cat-eye cat-eye--left" />
+                <div className="cat-eye cat-eye--right" />
+                <div className="cat-nose" />
+                <div className="cat-paw cat-paw--front" />
+                <div className="cat-paw cat-paw--front cat-paw--front-right" />
+                <div className="cat-tail" />
+              </div>
+              <svg className="thread-line" viewBox="0 0 220 120">
+                <path d="M10 84 C70 50, 120 120, 190 70" />
+              </svg>
+              <div className="thread-ball" />
+            </div>
+          )}
           <h1 className="logo">Patchwork</h1>
           <p className="loading">Loading...</p>
         </div>
