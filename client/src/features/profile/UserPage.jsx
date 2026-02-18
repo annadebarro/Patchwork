@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { API_BASE_URL, apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import PostCard from "../feed/PostCard";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 import QuiltListView from "../quilts/QuiltListView";
 import QuiltDetailView from "../quilts/QuiltDetailView";
 import FollowListModal from "./FollowListModal";
+import StarRating from "../../shared/ui/StarRating";
 
 function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
   const { username } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [profileUser, setProfileUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(true);
@@ -22,6 +24,13 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
   const [activeTab, setActiveTab] = useState("everything");
   const [quilts, setQuilts] = useState([]);
   const [selectedQuiltId, setSelectedQuiltId] = useState(null);
+  const [ratings, setRatings] = useState([]);
+  const [ratingsAvg, setRatingsAvg] = useState(null);
+  const [ratingsTotal, setRatingsTotal] = useState(0);
+  const [ratingsLoading, setRatingsLoading] = useState(false);
+  const [editingRatingId, setEditingRatingId] = useState(null);
+  const [editScore, setEditScore] = useState(0);
+  const [editReview, setEditReview] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -89,6 +98,41 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
     return () => { isMounted = false; };
   }, [isOwnProfile, username, refreshKey, user?.username]);
 
+  // Activate tab from ?tab= query param (e.g. from rating notification click)
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const validTabs = ["everything", "marketplace", "quilts", "ratings"];
+    if (tabParam && validTabs.includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (activeTab !== "ratings") return;
+    const targetUserId = isOwnProfile ? user?.id : profileUser?.id;
+    if (!targetUserId) return;
+
+    let isMounted = true;
+    async function fetchRatings() {
+      setRatingsLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/ratings/users/${targetUserId}`);
+        const data = await parseApiResponse(res);
+        if (res.ok && isMounted) {
+          setRatings(Array.isArray(data?.ratings) ? data.ratings : []);
+          setRatingsAvg(data?.averageScore ?? null);
+          setRatingsTotal(data?.totalCount ?? 0);
+        }
+      } catch {
+        // silent
+      } finally {
+        if (isMounted) setRatingsLoading(false);
+      }
+    }
+    fetchRatings();
+    return () => { isMounted = false; };
+  }, [activeTab, isOwnProfile, user?.id, profileUser?.id]);
+
   async function toggleFollow() {
     if (followBusy || !profileUser) return;
     const token = localStorage.getItem("token");
@@ -111,6 +155,42 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
       console.error("Follow toggle failed:", err);
     } finally {
       setFollowBusy(false);
+    }
+  }
+
+  function recomputeAvg(updatedRatings) {
+    if (!updatedRatings.length) { setRatingsAvg(null); setRatingsTotal(0); return; }
+    setRatingsTotal(updatedRatings.length);
+    setRatingsAvg(updatedRatings.reduce((s, r) => s + r.score, 0) / updatedRatings.length);
+  }
+
+  async function deleteRating(ratingId) {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${API_BASE_URL}/ratings/${ratingId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const updated = ratings.filter((r) => r.id !== ratingId);
+      setRatings(updated);
+      recomputeAvg(updated);
+    }
+  }
+
+  async function saveEditRating(ratingId) {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${API_BASE_URL}/ratings/${ratingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ score: editScore, review: editReview }),
+    });
+    if (res.ok) {
+      const updated = ratings.map((r) =>
+        r.id === ratingId ? { ...r, score: editScore, review: editReview } : r
+      );
+      setRatings(updated);
+      recomputeAvg(updated);
+      setEditingRatingId(null);
     }
   }
 
@@ -266,7 +346,86 @@ function UserPage({ user, isOwnProfile = false, refreshKey = 0, currentUser }) {
               <QuiltListView quilts={quilts} onSelectQuilt={setSelectedQuiltId} isOwnProfile={isOwnProfile} />
             )
           ) : activeTab === "ratings" ? (
-            <div className="placeholder"><p>Ratings coming soon...</p></div>
+            ratingsLoading ? (
+              <div className="placeholder"><p>Loading ratings...</p></div>
+            ) : ratingsTotal === 0 ? (
+              <div className="placeholder"><p>No ratings yet.</p></div>
+            ) : (
+              <div className="ratings-tab">
+                <div className="rating-avg">
+                  <StarRating value={Math.round(ratingsAvg || 0)} size="md" />
+                  <span className="rating-avg-score">
+                    {ratingsAvg !== null ? ratingsAvg.toFixed(1) : "—"} / 5
+                  </span>
+                  <span className="rating-avg-count">({ratingsTotal} review{ratingsTotal !== 1 ? "s" : ""})</span>
+                </div>
+                <div className="rating-list">
+                  {ratings.map((r) => {
+                    const isMyRating = currentUser?.id === r.raterId;
+                    const isEditing = editingRatingId === r.id;
+                    return (
+                      <div key={r.id} className="rating-card">
+                        <div className="rating-card-header">
+                          <button
+                            type="button"
+                            className="rating-card-avatar-btn"
+                            onClick={() => r.rater?.username && navigate(`/userpage/${r.rater.username}`)}
+                          >
+                            <ProfilePatch name={r.rater?.name} imageUrl={r.rater?.profilePicture} />
+                          </button>
+                          <div className="rating-card-info">
+                            <button
+                              type="button"
+                              className="rating-card-name"
+                              onClick={() => r.rater?.username && navigate(`/userpage/${r.rater.username}`)}
+                            >{r.rater?.name || r.rater?.username}</button>
+                            {isEditing ? (
+                              <StarRating value={editScore} onChange={setEditScore} size="sm" />
+                            ) : (
+                              <StarRating value={r.score} size="sm" />
+                            )}
+                          </div>
+                          <span className="rating-card-date">
+                            {new Date(r.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </span>
+                          {isMyRating && !isEditing && (
+                            <div className="rating-card-actions">
+                              <button
+                                type="button"
+                                className="rating-action-btn"
+                                onClick={() => { setEditingRatingId(r.id); setEditScore(r.score); setEditReview(r.review || ""); }}
+                              >Edit</button>
+                              <button
+                                type="button"
+                                className="rating-action-btn rating-action-btn--delete"
+                                onClick={() => deleteRating(r.id)}
+                              >Delete</button>
+                            </div>
+                          )}
+                        </div>
+                        {isEditing ? (
+                          <div className="rating-edit-form">
+                            <textarea
+                              className="rating-edit-textarea"
+                              value={editReview}
+                              onChange={(e) => setEditReview(e.target.value)}
+                              placeholder="Edit your review (optional)"
+                              rows={2}
+                            />
+                            <div className="rating-edit-actions">
+                              <button type="button" className="rating-action-btn" onClick={() => saveEditRating(r.id)}>Save</button>
+                              <button type="button" className="rating-action-btn" onClick={() => setEditingRatingId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          r.review && <p className="rating-card-review">{r.review}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )
           ) : null}
         </section>
       </section>

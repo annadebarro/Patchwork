@@ -78,6 +78,10 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
         return `@${actor} liked your comment`;
       case "message":
         return `@${actor} sent you a message`;
+      case "deal_complete":
+        return `@${actor} marked the deal as complete`;
+      case "rating":
+        return `@${actor} left you a rating`;
       default:
         return `@${actor} interacted with you`;
     }
@@ -208,7 +212,11 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
                     if (notif.type === "follow") {
                       navigate(`/userpage/${notif.actor?.username}`);
                     } else if (notif.type === "message") {
-                      navigate(notif.conversationId ? `/messages?convo=${notif.conversationId}` : "/messages");
+                      navigate("/messages", notif.conversationId ? { state: { activeConvoId: notif.conversationId } } : undefined);
+                    } else if (notif.type === "deal_complete") {
+                      navigate("/messages", { state: { activeConvoId: notif.conversationId, showRating: true } });
+                    } else if (notif.type === "rating") {
+                      navigate("/profile?tab=ratings");
                     } else if (notif.postId) {
                       navigate(`/post/${notif.postId}`);
                     }

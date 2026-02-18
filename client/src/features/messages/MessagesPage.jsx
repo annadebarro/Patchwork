@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
+import RatingModal from "./RatingModal";
 
 function MessagesPage({ currentUser }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState([]);
   const [activeConvoId, setActiveConvoId] = useState(null);
@@ -20,9 +22,25 @@ function MessagesPage({ currentUser }) {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [convoDetail, setConvoDetail] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [markingComplete, setMarkingComplete] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingTarget, setRatingTarget] = useState(null);
+  const [ratingConvoId, setRatingConvoId] = useState(null);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const conversationsRef = useRef([]);
+  const activeConvoIdRef = useRef(null);
+  const showRatingAfterLoadRef = useRef(false);
   const SEARCH_USERS_LIMIT = 20;
+
+  // Keep refs in sync so socket handlers and effects always see fresh values
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
+    activeConvoIdRef.current = activeConvoId;
+  }, [activeConvoId]);
 
   // Fetch conversations
   useEffect(() => {
@@ -47,17 +65,35 @@ function MessagesPage({ currentUser }) {
     fetchConversations();
   }, []);
 
-  // Auto-select conversation from URL query param (e.g. from notification click)
+  // Auto-select conversation from URL query param or navigation state
   useEffect(() => {
+    const stateConvoId = location.state?.activeConvoId;
+    const stateShowRating = location.state?.showRating;
     const convoParam = searchParams.get("convo");
-    if (convoParam && conversations.length > 0) {
-      const match = conversations.find((c) => c.id === convoParam);
+
+    if (stateConvoId && conversations.length > 0) {
+      const match = conversations.find((c) => c.id === stateConvoId);
       if (match) {
-        setActiveConvoId(convoParam);
+        if (stateShowRating) {
+          if (activeConvoIdRef.current === stateConvoId) {
+            // Already viewing this conversation — fetchMessages won't re-run,
+            // so show the rating modal immediately using ref data
+            openRatingModalForConvo(stateConvoId);
+          } else {
+            setActiveConvoId(stateConvoId);
+            showRatingAfterLoadRef.current = true;
+          }
+        } else {
+          setActiveConvoId(stateConvoId);
+        }
       }
+      navigate(location.pathname, { replace: true, state: {} });
+    } else if (convoParam && conversations.length > 0) {
+      const match = conversations.find((c) => c.id === convoParam);
+      if (match) setActiveConvoId(convoParam);
       setSearchParams({}, { replace: true });
     }
-  }, [conversations, searchParams, setSearchParams]);
+  }, [conversations, searchParams, setSearchParams, location.state, location.pathname, navigate]);
 
   // Socket.IO connection
   useEffect(() => {
@@ -74,11 +110,9 @@ function MessagesPage({ currentUser }) {
       socketRef.current = socket;
 
       socket.on("new_message", ({ message, conversationId }) => {
-        // Update messages if viewing that conversation
         if (conversationId === activeConvoId) {
           setMessages((prev) => [...prev, message]);
         }
-        // Update conversation list (move to top, update last message)
         setConversations((prev) => {
           const updated = prev.map((c) =>
             c.id === conversationId
@@ -96,6 +130,33 @@ function MessagesPage({ currentUser }) {
           return [conversation, ...prev];
         });
       });
+
+      socket.on("deal_completed", ({ conversationId }) => {
+        // Update conversations list
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversationId ? { ...c, dealStatus: "completed" } : c
+          )
+        );
+        // Update convoDetail if currently viewing this conversation
+        setConvoDetail((prev) => {
+          if (!prev || prev.id !== conversationId) return prev;
+          return { ...prev, dealStatus: "completed" };
+        });
+
+        // Show the rating modal — use ref for freshest participant data
+        // Small timeout lets state updates above settle first
+        setTimeout(() => {
+          const convo = conversationsRef.current.find((c) => c.id === conversationId);
+          const participants = convo?.participants || [];
+          const other = participants.find((p) => p.user?.id !== currentUser?.id);
+          if (other?.user) {
+            setRatingTarget(other.user);
+            setRatingConvoId(conversationId);
+            setShowRatingModal(true);
+          }
+        }, 0);
+      });
     }
 
     connectSocket();
@@ -103,7 +164,7 @@ function MessagesPage({ currentUser }) {
     return () => {
       if (socket) socket.disconnect();
     };
-  }, [activeConvoId]);
+  }, [activeConvoId, currentUser?.id]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -130,7 +191,21 @@ function MessagesPage({ currentUser }) {
         const data = await parseApiResponse(res);
         if (res.ok && isMounted) {
           setMessages(Array.isArray(data?.messages) ? data.messages : []);
-          setConvoDetail(data?.conversation || null);
+          const convo = data?.conversation || null;
+          setConvoDetail(convo);
+
+          // If navigated from a "deal complete" notification, show the rating modal
+          if (showRatingAfterLoadRef.current && convo?.dealStatus === "completed") {
+            showRatingAfterLoadRef.current = false;
+            const other = (convo.participants || []).find(
+              (p) => p.user?.id !== currentUser?.id
+            );
+            if (other?.user) {
+              setRatingTarget(other.user);
+              setRatingConvoId(convo.id);
+              setShowRatingModal(true);
+            }
+          }
         }
       } catch {
         // silent
@@ -162,7 +237,6 @@ function MessagesPage({ currentUser }) {
       if (res.ok) {
         setMessages((prev) => [...prev, data.message]);
         setMsgBody("");
-        // Update conversation list
         setConversations((prev) => {
           const updated = prev.map((c) =>
             c.id === activeConvoId
@@ -270,6 +344,44 @@ function MessagesPage({ currentUser }) {
     }
   }
 
+  function openRatingModalForConvo(conversationId) {
+    const convo = conversationsRef.current.find((c) => c.id === conversationId);
+    const participants = convo?.participants || convoDetail?.participants || [];
+    const other = participants.find((p) => p.user?.id !== currentUser?.id);
+    if (other?.user) {
+      setRatingTarget(other.user);
+      setRatingConvoId(conversationId);
+      setShowRatingModal(true);
+    }
+  }
+
+  async function markDealComplete() {
+    if (markingComplete || !activeConvoId) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setMarkingComplete(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/messages/conversations/${activeConvoId}/complete`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setConvoDetail((prev) => prev ? { ...prev, dealStatus: "completed" } : prev);
+        setConversations((prev) =>
+          prev.map((c) => c.id === activeConvoId ? { ...c, dealStatus: "completed" } : c)
+        );
+        // The socket event will trigger the modal for both parties,
+        // but show it immediately for the person who clicked too
+        openRatingModalForConvo(activeConvoId);
+      }
+    } catch {
+      // silent
+    } finally {
+      setMarkingComplete(false);
+    }
+  }
+
   function getConvoName(convo) {
     const others = (convo.participants || [])
       .filter((p) => p.user?.id !== currentUser?.id)
@@ -294,6 +406,11 @@ function MessagesPage({ currentUser }) {
     if (diffDays < 7) return d.toLocaleDateString("en-US", { weekday: "short" });
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
+
+  const showDealCompleteBtn =
+    convoDetail &&
+    convoDetail.linkedPostId &&
+    convoDetail.dealStatus !== "completed";
 
   return (
     <div className="feed-content">
@@ -402,6 +519,19 @@ function MessagesPage({ currentUser }) {
                   <span className="chat-header-count">
                     {convoDetail.participants.length} members
                   </span>
+                )}
+                {showDealCompleteBtn && (
+                  <button
+                    type="button"
+                    className="deal-complete-btn"
+                    onClick={markDealComplete}
+                    disabled={markingComplete}
+                  >
+                    {markingComplete ? "Marking..." : "Mark deal as complete"}
+                  </button>
+                )}
+                {convoDetail?.dealStatus === "completed" && (
+                  <span className="deal-complete-badge">Deal complete</span>
                 )}
               </div>
               <div className="chat-messages">
@@ -524,6 +654,15 @@ function MessagesPage({ currentUser }) {
             </div>
           </div>
         )}
+
+        {/* Rating Modal */}
+        <RatingModal
+          isOpen={showRatingModal}
+          onClose={() => setShowRatingModal(false)}
+          conversationId={ratingConvoId}
+          rateeUser={ratingTarget}
+          onSubmitted={() => setShowRatingModal(false)}
+        />
       </div>
     </div>
   );

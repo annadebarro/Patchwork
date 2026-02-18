@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
+import { API_BASE_URL, apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 import {
   addTagValue,
@@ -150,6 +150,27 @@ function PostDetailPage({ currentUser }) {
   }, []);
 
   const isOwner = currentUser && post && currentUser.id === post.userId;
+
+  async function messageSeller() {
+    const token = localStorage.getItem("token");
+    if (!token || !post) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/messages/conversations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ participantIds: [post.userId], postId: post.id }),
+      });
+      const data = await parseApiResponse(res);
+      if (res.ok) {
+        navigate("/messages", { state: { activeConvoId: data.conversation.id } });
+      }
+    } catch {
+      // silent
+    }
+  }
 
   function addEditStyleTag(rawTag) {
     setEditStyleTags((prev) => addTagValue(prev, rawTag, MAX_STYLE_TAGS));
@@ -643,6 +664,15 @@ function PostDetailPage({ currentUser }) {
                 onLikeChange={handleLikeChange}
               />
               <PatchButton postId={post.id} telemetryContext={patchTelemetryContext} />
+              {isMarket && !isOwner && currentUser && (
+                <button
+                  type="button"
+                  className="save-button save-button--sm"
+                  onClick={messageSeller}
+                >
+                  Message seller
+                </button>
+              )}
             </div>
 
             {isOwner && !editing && (

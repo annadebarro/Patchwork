@@ -12,6 +12,7 @@ const messagesRouter = require("./messages");
 const searchRouter = require("./search");
 const recommendationsRouter = require("./recommendations");
 const adminRouter = require("./admin");
+const ratingsRouter = require("./ratings");
 
 function registerRoutes(app) {
   app.use("/api/health", healthRouter);
@@ -28,6 +29,7 @@ function registerRoutes(app) {
   app.use("/api/search", searchRouter);
   app.use("/api/recommendations", recommendationsRouter);
   app.use("/api/admin", adminRouter);
+  app.use("/api/ratings", ratingsRouter);
 }
 
 module.exports = { registerRoutes };

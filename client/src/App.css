@@ -4007,3 +4007,294 @@ button:disabled {
     min-height: 60vh;
   }
 }
+
+/* ── Star Rating ── */
+.star-rating {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  align-items: center;
+}
+
+.star {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.star-svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: block;
+  overflow: visible; /* let drop-shadow bleed outside viewBox */
+}
+
+/* Star body — empty ghost outline */
+.star-body {
+  fill: rgba(160, 40, 25, 0.09);
+  stroke: rgba(160, 40, 25, 0.25);
+  stroke-width: 0.8;
+  stroke-dasharray: none;
+  transition: fill 0.15s;
+}
+
+/* Star body — filled red patch */
+.star--filled .star-body {
+  fill: #c82010;
+  stroke: none;
+}
+
+/*
+ * Stitching path — same shape as the body, rendered with a dashed stroke,
+ * but clipped via clipPath to the star's own filled region. This means only
+ * the portion of the stroke that falls INSIDE the star is drawn, producing
+ * white stitch marks along the inside edge rather than a border outside.
+ */
+.star-stitch {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 1.2;
+  stroke-dasharray: 2 3.5;
+  stroke-linecap: round;
+}
+
+/* Show stitching only on filled stars */
+.star--filled .star-stitch {
+  stroke: rgba(255, 248, 235, 0.9);
+}
+
+/* Patch depth */
+.star--filled {
+  filter: drop-shadow(0 2px 3px rgba(120, 10, 0, 0.5));
+}
+
+.star--interactive {
+  cursor: pointer;
+}
+
+.star--interactive:hover .star-body,
+.star--interactive:focus-visible .star-body {
+  fill: #e02818;
+}
+
+.star--interactive:hover {
+  transform: scale(1.2);
+  filter: drop-shadow(0 2px 4px rgba(80, 15, 5, 0.5));
+}
+
+/* Small variant */
+.star-rating--sm .star-svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Medium variant */
+.star-rating--md .star-svg {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+/* ── Deal complete button ── */
+.deal-complete-btn {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border: 2px solid #4a9b6f;
+  background: #eaf7f0;
+  color: #2d6e4e;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.15s, color 0.15s;
+  margin-left: auto;
+}
+
+.deal-complete-btn:hover:not(:disabled) {
+  background: #4a9b6f;
+  color: #fff;
+}
+
+.deal-complete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.deal-complete-badge {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border: 2px solid #4a9b6f;
+  background: #eaf7f0;
+  color: #2d6e4e;
+  margin-left: auto;
+}
+
+/* ── Rating card (profile Ratings tab) ── */
+.ratings-tab {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.rating-avg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 4px;
+  border-bottom: 2px solid var(--denim-wash);
+}
+
+.rating-avg .star-rating--md .star {
+  font-size: 1.6rem;
+}
+
+.rating-avg-score {
+  font-family: 'Courier Prime', monospace;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--denim-dark);
+}
+
+.rating-avg-count {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.85rem;
+  color: var(--denim-mid, #5a7a9a);
+}
+
+.rating-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rating-card {
+  border: 2px solid var(--denim-wash);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--cream);
+}
+
+.rating-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rating-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.rating-card-name {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: var(--denim-dark);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rating-card-name:hover {
+  text-decoration: underline;
+}
+
+.rating-card-date {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.75rem;
+  color: var(--denim-mid, #5a7a9a);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.rating-card-review {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.88rem;
+  color: var(--denim-dark);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.rating-card-avatar-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.rating-card-avatar-btn .profile-patch {
+  width: 38px;
+  height: 38px;
+}
+
+.rating-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.rating-action-btn {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border: 1.5px solid var(--denim-wash);
+  background: transparent;
+  color: var(--denim-dark);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.rating-action-btn:hover {
+  background: var(--denim-wash);
+}
+
+.rating-action-btn--delete {
+  border-color: #bf2b1a;
+  color: #bf2b1a;
+}
+
+.rating-action-btn--delete:hover {
+  background: #bf2b1a;
+  color: var(--cream);
+}
+
+.rating-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rating-edit-textarea {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1.5px solid var(--denim-wash);
+  background: var(--cream);
+  color: var(--denim-dark);
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.rating-edit-textarea:focus {
+  outline: none;
+  border-color: var(--denim-dark);
+}
+
+.rating-edit-actions {
+  display: flex;
+  gap: 6px;
+}

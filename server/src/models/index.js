@@ -135,6 +135,16 @@ function initModels(sequelize) {
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true,
       },
+      linkedPostId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "linked_post_id",
+      },
+      dealStatus: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        field: "deal_status",
+      },
     },
     {
       tableName: "conversations",
@@ -160,6 +170,11 @@ function initModels(sequelize) {
         type: DataTypes.UUID,
         allowNull: false,
         field: "user_id",
+      },
+      leftAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "left_at",
       },
     },
     {
@@ -624,13 +639,18 @@ function initModels(sequelize) {
         field: "actor_id",
       },
       type: {
-        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention", "comment_like", "message"),
+        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention", "comment_like", "message", "rating", "deal_complete"),
         allowNull: false,
       },
       postId: {
         type: DataTypes.UUID,
         allowNull: true,
         field: "post_id",
+      },
+      conversationId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "conversation_id",
       },
       read: {
         type: DataTypes.BOOLEAN,
@@ -653,6 +673,49 @@ function initModels(sequelize) {
   User.hasMany(Notification, { foreignKey: "userId", as: "notifications" });
   Notification.belongsTo(User, { foreignKey: "actorId", as: "actor" });
   Notification.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
+  const Rating = sequelize.define(
+    "Rating",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      raterId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "rater_id",
+      },
+      rateeId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "ratee_id",
+      },
+      conversationId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "conversation_id",
+      },
+      score: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        validate: { min: 1, max: 5 },
+      },
+      review: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+    },
+    { tableName: "ratings", timestamps: true, underscored: true }
+  );
+
+  User.hasMany(Rating, { foreignKey: "raterId", as: "ratingsGiven" });
+  User.hasMany(Rating, { foreignKey: "rateeId", as: "ratingsReceived" });
+  Rating.belongsTo(User, { foreignKey: "raterId", as: "rater" });
+  Rating.belongsTo(User, { foreignKey: "rateeId", as: "ratee" });
+  Conversation.hasMany(Rating, { foreignKey: "conversationId", as: "ratings" });
+  Rating.belongsTo(Conversation, { foreignKey: "conversationId", as: "conversation" });
 
   User.hasMany(Like, { foreignKey: "userId", as: "likes" });
   Like.belongsTo(User, { foreignKey: "userId", as: "user" });
@@ -695,6 +758,7 @@ function initModels(sequelize) {
     Quilt,
     Patch,
     Notification,
+    Rating,
   };
 
   return models;

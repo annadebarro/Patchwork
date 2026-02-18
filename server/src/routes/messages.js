@@ -10,9 +10,9 @@ router.get("/conversations", authMiddleware, async (req, res) => {
   const { Conversation, ConversationParticipant, Message, User } = getModels();
 
   try {
-    // Find all conversation IDs the user participates in
+    // Only conversations the user hasn't soft-deleted (left_at IS NULL)
     const participantRows = await ConversationParticipant.findAll({
-      where: { userId: req.user.id },
+      where: { userId: req.user.id, leftAt: null },
       attributes: ["conversationId"],
     });
 
@@ -62,7 +62,7 @@ router.get("/conversations", authMiddleware, async (req, res) => {
 // POST /conversations — create or find a conversation
 router.post("/conversations", authMiddleware, async (req, res) => {
   const { Conversation, ConversationParticipant, User } = getModels();
-  const { participantIds } = req.body || {};
+  const { participantIds, postId } = req.body || {};
 
   if (!Array.isArray(participantIds) || participantIds.length === 0) {
     return res.status(400).json({ message: "participantIds array is required." });
@@ -76,10 +76,10 @@ router.post("/conversations", authMiddleware, async (req, res) => {
   }
 
   try {
-    // For 1:1 conversations, check if one already exists
+    // For 1:1 conversations, check if one already exists where both users are still active
     if (allIds.length === 2) {
       const existingParticipations = await ConversationParticipant.findAll({
-        where: { userId: allIds },
+        where: { userId: allIds, leftAt: null },
         attributes: ["conversationId", "userId"],
       });
 
@@ -93,9 +93,9 @@ router.post("/conversations", authMiddleware, async (req, res) => {
       // Find a conversation with exactly these 2 participants
       for (const [convId, members] of Object.entries(convMap)) {
         if (members.size === 2 && allIds.every((id) => members.has(id))) {
-          // Verify no extra participants
+          // Verify no extra active participants
           const totalCount = await ConversationParticipant.count({
-            where: { conversationId: convId },
+            where: { conversationId: convId, leftAt: null },
           });
           if (totalCount === 2) {
             const existing = await Conversation.findByPk(convId, {
@@ -120,7 +120,8 @@ router.post("/conversations", authMiddleware, async (req, res) => {
     }
 
     // Create new conversation
-    const conversation = await Conversation.create();
+    const createData = postId ? { linkedPostId: postId } : {};
+    const conversation = await Conversation.create(createData);
     await ConversationParticipant.bulkCreate(
       allIds.map((userId) => ({ conversationId: conversation.id, userId }))
     );
@@ -166,9 +167,9 @@ router.get("/conversations/:id", authMiddleware, async (req, res) => {
   const offset = Math.max(Number(req.query.offset) || 0, 0);
 
   try {
-    // Verify user is a participant
+    // Verify user is an active participant (hasn't soft-deleted this conversation)
     const participation = await ConversationParticipant.findOne({
-      where: { conversationId: id, userId: req.user.id },
+      where: { conversationId: id, userId: req.user.id, leftAt: null },
     });
     if (!participation) {
       return res.status(403).json({ message: "You are not in this conversation." });
@@ -217,24 +218,29 @@ router.get("/conversations/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /conversations/:id — leave a conversation
+// DELETE /conversations/:id — soft-delete a conversation for this user
 router.delete("/conversations/:id", authMiddleware, async (req, res) => {
   const { Conversation, ConversationParticipant, Message } = getModels();
   const { id } = req.params;
 
   try {
     const participation = await ConversationParticipant.findOne({
-      where: { conversationId: id, userId: req.user.id },
+      where: { conversationId: id, userId: req.user.id, leftAt: null },
     });
     if (!participation) {
       return res.status(403).json({ message: "You are not in this conversation." });
     }
 
-    await participation.destroy();
+    // Soft-delete: mark when this user left rather than destroying the row.
+    // The row is kept so the other participant can still resolve this user's
+    // username/profile pic via the participant join.
+    await participation.update({ leftAt: new Date() });
 
-    // If no participants left, delete conversation and its messages
-    const remaining = await ConversationParticipant.count({ where: { conversationId: id } });
-    if (remaining === 0) {
+    // Only truly delete when every participant has left
+    const activeRemaining = await ConversationParticipant.count({
+      where: { conversationId: id, leftAt: null },
+    });
+    if (activeRemaining === 0) {
       await Message.destroy({ where: { conversationId: id } });
       await Conversation.destroy({ where: { id } });
     }
@@ -257,9 +263,9 @@ router.post("/conversations/:id/messages", authMiddleware, async (req, res) => {
   }
 
   try {
-    // Verify user is a participant
+    // Verify user is an active participant
     const participation = await ConversationParticipant.findOne({
-      where: { conversationId: id, userId: req.user.id },
+      where: { conversationId: id, userId: req.user.id, leftAt: null },
     });
     if (!participation) {
       return res.status(403).json({ message: "You are not in this conversation." });
@@ -284,9 +290,9 @@ router.post("/conversations/:id/messages", authMiddleware, async (req, res) => {
       ],
     });
 
-    // Get all participants except sender
+    // Get active participants except sender (don't notify users who deleted the conversation)
     const participants = await ConversationParticipant.findAll({
-      where: { conversationId: id, userId: { [Op.ne]: req.user.id } },
+      where: { conversationId: id, userId: { [Op.ne]: req.user.id }, leftAt: null },
     });
 
     // Emit via Socket.IO and create notifications
@@ -311,6 +317,56 @@ router.post("/conversations/:id/messages", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("Send message failed:", err);
     return res.status(500).json({ message: "Failed to send message." });
+  }
+});
+
+// PATCH /conversations/:id/complete — mark a deal as complete
+router.patch("/conversations/:id/complete", authMiddleware, async (req, res) => {
+  const { Conversation, ConversationParticipant, Notification } = getModels();
+  const { id } = req.params;
+
+  try {
+    const participation = await ConversationParticipant.findOne({
+      where: { conversationId: id, userId: req.user.id, leftAt: null },
+    });
+    if (!participation) {
+      return res.status(403).json({ message: "You are not in this conversation." });
+    }
+
+    const conversation = await Conversation.findByPk(id);
+    if (!conversation) {
+      return res.status(404).json({ message: "Conversation not found." });
+    }
+    if (!conversation.linkedPostId) {
+      return res.status(400).json({ message: "This conversation is not linked to a post." });
+    }
+
+    await conversation.update({ dealStatus: "completed" });
+
+    const allParticipants = await ConversationParticipant.findAll({
+      where: { conversationId: id, leftAt: null },
+    });
+
+    const io = req.app.get("io");
+    for (const p of allParticipants) {
+      if (io) {
+        io.to(p.userId).emit("deal_completed", { conversationId: id });
+      }
+      if (p.userId !== req.user.id) {
+        await Notification.create({
+          userId: p.userId,
+          actorId: req.user.id,
+          type: "deal_complete",
+          postId: null,
+          conversationId: id,
+        });
+      }
+    }
+
+    return res.json({ message: "Deal marked as complete." });
+  } catch (err) {
+    console.error("Mark deal complete failed:", err);
+    return res.status(500).json({ message: "Failed to mark deal as complete." });
   }
 });
 
