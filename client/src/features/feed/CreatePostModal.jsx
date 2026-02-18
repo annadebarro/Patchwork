@@ -340,6 +340,55 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
             </select>
           </label>
 
+          <div>
+            <label>
+              Images ({imageItems.length}/{MAX_IMAGES})
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileChange}
+                disabled={isCropping}
+              />
+            </label>
+          </div>
+
+          {isCropping && (
+            <div>
+              <p className="field-note">Crop image</p>
+              <ImageCropper
+                imageUrl={cropRawUrl}
+                onCropDone={handleCropDone}
+                onChangeImage={handleCancelCrop}
+                onUseOriginal={handleCancelCrop}
+              />
+            </div>
+          )}
+
+          {!isCropping && imageItems.length > 0 && (
+            <div>
+              <SortableThumbnails
+                items={thumbItems}
+                onReorder={(newOrder) => {
+                  const idMap = new Map(imageItems.map((item) => [item.id, item]));
+                  handleReorder(newOrder.map((t) => idMap.get(t.id)));
+                }}
+                onDelete={handleDeleteThumb}
+                onCrop={handleStartCrop}
+              />
+              {imageItems.length < MAX_IMAGES && (
+                <button
+                  type="button"
+                  className="cancel-button cancel-button--sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Add more images
+                </button>
+              )}
+            </div>
+          )}
+
           <label>
             Caption
             <textarea
@@ -546,55 +595,6 @@ function CreatePostModal({ isOpen, onClose, onCreated }) {
                 )}
               </div>
             </>
-          )}
-
-          <div>
-            <label>
-              Images ({imageItems.length}/{MAX_IMAGES})
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileChange}
-                disabled={isCropping}
-              />
-            </label>
-          </div>
-
-          {isCropping && (
-            <div>
-              <p className="field-note">Crop image</p>
-              <ImageCropper
-                imageUrl={cropRawUrl}
-                onCropDone={handleCropDone}
-                onChangeImage={handleCancelCrop}
-                onUseOriginal={handleCancelCrop}
-              />
-            </div>
-          )}
-
-          {!isCropping && imageItems.length > 0 && (
-            <div>
-              <SortableThumbnails
-                items={thumbItems}
-                onReorder={(newOrder) => {
-                  const idMap = new Map(imageItems.map((item) => [item.id, item]));
-                  handleReorder(newOrder.map((t) => idMap.get(t.id)));
-                }}
-                onDelete={handleDeleteThumb}
-                onCrop={handleStartCrop}
-              />
-              {imageItems.length < MAX_IMAGES && (
-                <button
-                  type="button"
-                  className="cancel-button cancel-button--sm"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Add more images
-                </button>
-              )}
-            </div>
           )}
 
           <button type="submit" className="save-button" disabled={submitting || isCropping}>
