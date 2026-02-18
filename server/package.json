@@ -4,6 +4,17 @@
   "description": "Patchwork backend API server",
   "main": "src/server.js",
   "scripts": {
+    "db:baseline": "node scripts/db-baseline-existing.js",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:migrate:status": "sequelize-cli db:migrate:status",
+    "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "db:backup:json": "node scripts/db-backup-json.js",
+    "db:restore:json": "node scripts/db-restore-json.js",
+    "db:reset:safe": "node scripts/db-reset-safe.js",
+    "db:seed:fixtures": "node scripts/db-seed-fixtures.js",
+    "db:refresh:fixtures": "node scripts/db-refresh-fixtures.js",
+    "test": "node --test \"src/**/*.test.js\" \"scripts/**/*.test.js\"",
+    "test:action-logger": "node --test src/services/actionLogger.test.js",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
@@ -12,15 +23,19 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
     "pg": "^8.11.5",
-    "sequelize": "^6.37.5"
+    "sequelize": "^6.37.5",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "sequelize-cli": "^6.6.5"
   }
 }

@@ -25,6 +25,7 @@ function signToken(user) {
       email: user.email,
       username: user.username,
       name: user.name,
+      role: user.role || "user",
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -103,10 +104,12 @@ function serializeUser(user) {
     email: user.email,
     username: user.username,
     name: user.name,
+    role: user.role || "user",
     bio: typeof user.bio === "string" ? user.bio : "",
     avatarUrl: typeof user.avatarUrl === "string" ? user.avatarUrl : "",
     sizePreferences: normalizeStoredSizePreferences(user.sizePreferences),
     favoriteBrands,
+    profilePicture: user.profilePicture || null,
     onboardingStatus,
     onboardingPromptSeen,
     shouldShowOnboardingPrompt: onboardingStatus === "pending" && !onboardingPromptSeen,
@@ -412,10 +415,12 @@ router.get("/me", authMiddleware, async (req, res) => {
         "email",
         "username",
         "name",
+        "role",
         "bio",
         "avatarUrl",
         "sizePreferences",
         "favoriteBrands",
+        "profilePicture",
         "onboardingStatus",
         "onboardingPromptSeen",
       ],
@@ -429,7 +434,19 @@ router.get("/me", authMiddleware, async (req, res) => {
 });
 
 router.patch("/me", authMiddleware, async (req, res) => {
-  const { name, username, bio, avatarUrl, sizePreferences, favoriteBrands } = req.body || {};
+  const {
+    name,
+    username,
+    bio,
+    avatarUrl,
+    sizePreferences,
+    favoriteBrands,
+    profilePicture,
+  } = req.body || {};
+
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, "role")) {
+    return res.status(400).json({ message: "Role cannot be changed through this endpoint." });
+  }
 
   try {
     const { User } = getModels();
@@ -479,6 +496,9 @@ router.patch("/me", authMiddleware, async (req, res) => {
     }
     if (validatedFavoriteBrands.value !== undefined) {
       user.favoriteBrands = validatedFavoriteBrands.value;
+    }
+    if (typeof profilePicture === "string") {
+      user.profilePicture = profilePicture;
     }
 
     await user.save();

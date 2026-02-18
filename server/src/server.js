@@ -1,7 +1,11 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
+const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 const { connectToDatabase } = require("./config/db");
+const { assertNoPendingMigrations } = require("./config/migrationGuard");
 const { initModels } = require("./models");
 const { registerRoutes } = require("./routes");
 
@@ -75,116 +79,40 @@ app.use((err, _req, res, _next) => {
 
 let server;
 
-const DEFAULT_SIZE_PREFERENCES_JSON =
-  '{"tops":[],"bottoms":[],"dresses":[],"outerwear":[],"shoes":[]}';
-
-async function ensureUserPreferenceColumns(sequelize) {
-  const queryInterface = sequelize.getQueryInterface();
-  const queryOptions = {};
-
-  try {
-    await queryInterface.describeTable("users");
-  } catch {
-    // Fresh database with no users table yet. sync() will create everything.
-    return;
-  }
-
-  // Ensure enum type exists before adding onboarding_status.
-  await sequelize.query(
-    `DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1
-          FROM pg_type
-          WHERE typname = 'enum_users_onboarding_status'
-        ) THEN
-          CREATE TYPE "enum_users_onboarding_status" AS ENUM ('pending', 'completed', 'skipped');
-        END IF;
-      END
-    $$;`,
-    queryOptions
-  );
-
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ADD COLUMN IF NOT EXISTS "size_preferences" JSONB DEFAULT '${DEFAULT_SIZE_PREFERENCES_JSON}'::jsonb;`,
-    queryOptions
-  );
-  await sequelize.query(
-    'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" TEXT;',
-    queryOptions
-  );
-  await sequelize.query(
-    'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "favorite_brands" TEXT[] DEFAULT ARRAY[]::TEXT[];',
-    queryOptions
-  );
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ADD COLUMN IF NOT EXISTS "onboarding_status" "enum_users_onboarding_status" DEFAULT 'pending';`,
-    queryOptions
-  );
-  await sequelize.query(
-    'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "onboarding_prompt_seen" BOOLEAN DEFAULT false;',
-    queryOptions
-  );
-
-  // Backfill legacy rows before enforcing NOT NULL.
-  await sequelize.query(
-    `UPDATE "users"
-      SET "size_preferences" = '${DEFAULT_SIZE_PREFERENCES_JSON}'::jsonb
-      WHERE "size_preferences" IS NULL;`,
-    queryOptions
-  );
-  await sequelize.query(
-    'UPDATE "users" SET "favorite_brands" = ARRAY[]::TEXT[] WHERE "favorite_brands" IS NULL;',
-    queryOptions
-  );
-  await sequelize.query(
-    `UPDATE "users"
-      SET "onboarding_status" = 'pending'
-      WHERE "onboarding_status" IS NULL;`,
-    queryOptions
-  );
-  await sequelize.query(
-    'UPDATE "users" SET "onboarding_prompt_seen" = false WHERE "onboarding_prompt_seen" IS NULL;',
-    queryOptions
-  );
-
-  // Enforce defaults + not-null for future writes.
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ALTER COLUMN "size_preferences" SET DEFAULT '${DEFAULT_SIZE_PREFERENCES_JSON}'::jsonb,
-      ALTER COLUMN "size_preferences" SET NOT NULL;`,
-    queryOptions
-  );
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ALTER COLUMN "favorite_brands" SET DEFAULT ARRAY[]::TEXT[],
-      ALTER COLUMN "favorite_brands" SET NOT NULL;`,
-    queryOptions
-  );
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ALTER COLUMN "onboarding_status" SET DEFAULT 'pending',
-      ALTER COLUMN "onboarding_status" SET NOT NULL;`,
-    queryOptions
-  );
-  await sequelize.query(
-    `ALTER TABLE "users"
-      ALTER COLUMN "onboarding_prompt_seen" SET DEFAULT false,
-      ALTER COLUMN "onboarding_prompt_seen" SET NOT NULL;`,
-    queryOptions
-  );
-}
-
 async function bootstrap() {
   try {
     const sequelize = await connectToDatabase(process.env.DATABASE_URL);
     initModels(sequelize);
-    await ensureUserPreferenceColumns(sequelize);
-    await sequelize.sync({ alter: true });
+    await assertNoPendingMigrations(sequelize);
 
-    server = app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+    const io = new Server(httpServer, { cors: corsOptions });
+
+    // Socket.IO JWT authentication middleware
+    io.use((socket, next) => {
+      const token = socket.handshake.auth?.token;
+      if (!token) {
+        return next(new Error("Authentication required"));
+      }
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        socket.userId = decoded.id;
+        next();
+      } catch {
+        next(new Error("Invalid token"));
+      }
+    });
+
+    io.on("connection", (socket) => {
+      // Join the user to their own room
+      socket.join(socket.userId);
+      socket.on("disconnect", () => {});
+    });
+
+    // Store io on app so routes can emit events
+    app.set("io", io);
+
+    server = httpServer.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
       console.log("Server is ready to accept connections...");
     });

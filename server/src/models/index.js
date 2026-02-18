@@ -71,6 +71,16 @@ function initModels(sequelize) {
         defaultValue: false,
         field: "onboarding_prompt_seen",
       },
+      profilePicture: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "profile_picture",
+      },
+      role: {
+        type: DataTypes.ENUM("user", "admin"),
+        allowNull: false,
+        defaultValue: "user",
+      },
       passwordHash: {
         type: DataTypes.STRING,
         allowNull: false,
@@ -130,6 +140,16 @@ function initModels(sequelize) {
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true,
       },
+      linkedPostId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "linked_post_id",
+      },
+      dealStatus: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        field: "deal_status",
+      },
     },
     {
       tableName: "conversations",
@@ -155,6 +175,11 @@ function initModels(sequelize) {
         type: DataTypes.UUID,
         allowNull: false,
         field: "user_id",
+      },
+      leftAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "left_at",
       },
     },
     {
@@ -234,6 +259,35 @@ function initModels(sequelize) {
         allowNull: false,
         field: "target_id",
       },
+      targetType: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "target_type",
+      },
+      metadataJson: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: {},
+        field: "metadata_json",
+      },
+      sourceSurface: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "source_surface",
+      },
+      occurredAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "occurred_at",
+      },
+      sessionId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "session_id",
+      },
     },
     {
       tableName: "user_actions",
@@ -245,6 +299,18 @@ function initModels(sequelize) {
         },
         {
           fields: ["action_type"],
+        },
+        {
+          fields: ["user_id", { name: "occurred_at", order: "DESC" }],
+        },
+        {
+          fields: ["action_type", { name: "occurred_at", order: "DESC" }],
+        },
+        {
+          fields: ["target_type", "target_id"],
+        },
+        {
+          fields: ["source_surface", { name: "occurred_at", order: "DESC" }],
         },
       ],
     }
@@ -282,6 +348,407 @@ function initModels(sequelize) {
   User.hasMany(UserAction, { foreignKey: "userId", as: "actions" });
   UserAction.belongsTo(User, { foreignKey: "userId", as: "user" });
 
+  const Post = sequelize.define(
+    "Post",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      type: {
+        type: DataTypes.ENUM("regular", "market"),
+        allowNull: false,
+        defaultValue: "regular",
+      },
+      caption: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: "",
+      },
+      imageUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "image_url",
+      },
+      imageUrls: {
+        type: DataTypes.ARRAY(DataTypes.TEXT),
+        allowNull: false,
+        defaultValue: [],
+        field: "image_urls",
+      },
+      priceCents: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "price_cents",
+      },
+      category: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      subcategory: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      brand: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "",
+      },
+      styleTags: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+        field: "style_tags",
+      },
+      colorTags: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        allowNull: false,
+        defaultValue: [],
+        field: "color_tags",
+      },
+      condition: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+      },
+      sizeLabel: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "unknown",
+        field: "size_label",
+      },
+      isPublic: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+        field: "is_public",
+      },
+      isSold: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_sold",
+      },
+    },
+    {
+      tableName: "posts",
+      timestamps: true,
+      underscored: true,
+    }
+  );
+
+  User.hasMany(Post, { foreignKey: "userId", as: "posts" });
+  Post.belongsTo(User, { foreignKey: "userId", as: "author" });
+
+  const Like = sequelize.define(
+    "Like",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+    },
+    {
+      tableName: "likes",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["user_id", "post_id"],
+        },
+      ],
+    }
+  );
+
+  const Comment = sequelize.define(
+    "Comment",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+      body: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+      },
+      parentId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "parent_id",
+      },
+    },
+    {
+      tableName: "comments",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          fields: ["post_id", "created_at"],
+        },
+      ],
+    }
+  );
+
+  const Quilt = sequelize.define(
+    "Quilt",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      description: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: "",
+      },
+      isPublic: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "is_public",
+      },
+    },
+    {
+      tableName: "quilts",
+      timestamps: true,
+      underscored: true,
+    }
+  );
+
+  const Patch = sequelize.define(
+    "Patch",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      quiltId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "quilt_id",
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "post_id",
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+    },
+    {
+      tableName: "patches",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["quilt_id", "post_id"],
+        },
+      ],
+    }
+  );
+
+  const CommentLike = sequelize.define(
+    "CommentLike",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      commentId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "comment_id",
+      },
+    },
+    {
+      tableName: "comment_likes",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["user_id", "comment_id"],
+        },
+      ],
+    }
+  );
+
+  const Notification = sequelize.define(
+    "Notification",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "user_id",
+      },
+      actorId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "actor_id",
+      },
+      type: {
+        type: DataTypes.ENUM("like", "comment", "follow", "patch", "mention", "comment_like", "message", "rating", "deal_complete"),
+        allowNull: false,
+      },
+      postId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "post_id",
+      },
+      conversationId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: "conversation_id",
+      },
+      read: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+    },
+    {
+      tableName: "notifications",
+      timestamps: true,
+      underscored: true,
+      indexes: [
+        {
+          fields: ["user_id", "read", "created_at"],
+        },
+      ],
+    }
+  );
+
+  User.hasMany(Notification, { foreignKey: "userId", as: "notifications" });
+  Notification.belongsTo(User, { foreignKey: "actorId", as: "actor" });
+  Notification.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
+  const Rating = sequelize.define(
+    "Rating",
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      raterId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "rater_id",
+      },
+      rateeId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "ratee_id",
+      },
+      conversationId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        field: "conversation_id",
+      },
+      score: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        validate: { min: 1, max: 5 },
+      },
+      review: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+    },
+    { tableName: "ratings", timestamps: true, underscored: true }
+  );
+
+  User.hasMany(Rating, { foreignKey: "raterId", as: "ratingsGiven" });
+  User.hasMany(Rating, { foreignKey: "rateeId", as: "ratingsReceived" });
+  Rating.belongsTo(User, { foreignKey: "raterId", as: "rater" });
+  Rating.belongsTo(User, { foreignKey: "rateeId", as: "ratee" });
+  Conversation.hasMany(Rating, { foreignKey: "conversationId", as: "ratings" });
+  Rating.belongsTo(Conversation, { foreignKey: "conversationId", as: "conversation" });
+
+  User.hasMany(Like, { foreignKey: "userId", as: "likes" });
+  Like.belongsTo(User, { foreignKey: "userId", as: "user" });
+  Post.hasMany(Like, { foreignKey: "postId", as: "likes" });
+  Like.belongsTo(Post, { foreignKey: "postId", as: "post" });
+
+  User.hasMany(Comment, { foreignKey: "userId", as: "comments" });
+  Comment.belongsTo(User, { foreignKey: "userId", as: "author" });
+  Post.hasMany(Comment, { foreignKey: "postId", as: "comments" });
+  Comment.belongsTo(Post, { foreignKey: "postId", as: "post" });
+  Comment.hasMany(Comment, { foreignKey: "parentId", as: "replies", onDelete: "CASCADE", hooks: true });
+  Comment.belongsTo(Comment, { foreignKey: "parentId", as: "parent" });
+
+  User.hasMany(CommentLike, { foreignKey: "userId", as: "commentLikes" });
+  CommentLike.belongsTo(User, { foreignKey: "userId", as: "user" });
+  Comment.hasMany(CommentLike, { foreignKey: "commentId", as: "commentLikes" });
+  CommentLike.belongsTo(Comment, { foreignKey: "commentId", as: "comment" });
+
+  User.hasMany(Quilt, { foreignKey: "userId", as: "quilts" });
+  Quilt.belongsTo(User, { foreignKey: "userId", as: "owner" });
+
+  Quilt.hasMany(Patch, { foreignKey: "quiltId", as: "patches" });
+  Patch.belongsTo(Quilt, { foreignKey: "quiltId", as: "quilt" });
+  Post.hasMany(Patch, { foreignKey: "postId", as: "patches" });
+  Patch.belongsTo(Post, { foreignKey: "postId", as: "post" });
+  User.hasMany(Patch, { foreignKey: "userId", as: "patchesMade" });
+  Patch.belongsTo(User, { foreignKey: "userId", as: "user" });
+
   models = {
     User,
     Follow,
@@ -289,6 +756,14 @@ function initModels(sequelize) {
     ConversationParticipant,
     Message,
     UserAction,
+    Post,
+    Like,
+    Comment,
+    CommentLike,
+    Quilt,
+    Patch,
+    Notification,
+    Rating,
   };
 
   return models;
