@@ -124,3 +124,82 @@ npm run db:migrate --prefix server
 
 - `server/` — Express API with Postgres (Sequelize) connection (entry: `src/server.js`)
 - `client/` — Vite + React frontend scaffolded for Patchwork
+
+## Safe Reset, Backup, and Restore
+
+Before clearing test data, create a JSON backup snapshot:
+
+```bash
+npm run db:backup:json --prefix server
+```
+
+To reset app tables safely (with an automatic pre-reset backup), run:
+
+```bash
+npm run db:reset:safe --prefix server -- --confirm=RESET
+```
+
+To restore from the latest JSON backup:
+
+```bash
+npm run db:restore:json --prefix server -- --confirm=RESTORE
+```
+
+To restore from a specific backup file:
+
+```bash
+npm run db:restore:json --prefix server -- --confirm=RESTORE --file=/absolute/path/to/backup.json
+```
+
+To backup, reset, and seed fixtures in one command:
+
+```bash
+npm run db:refresh:fixtures --prefix server -- --confirm=REFRESH
+```
+
+Retention policy: JSON backups are stored under `server/backups/db/`, and the backup script keeps the latest 5 snapshots.
+
+## Fixture Data Seeding
+
+Fixture seeding generates recommendation-ready synthetic data:
+
+- ~120 users
+- ~1,500 posts (roughly 60% regular / 40% marketplace)
+- follows, likes, comments, quilts, messages, notifications
+- telemetry and strong-action `user_actions`
+- seeded admin account
+
+Seed command:
+
+```bash
+npm run db:seed:fixtures --prefix server
+```
+
+Admin credentials can be overridden with environment variables:
+
+- `SEED_ADMIN_EMAIL`
+- `SEED_ADMIN_USERNAME`
+- `SEED_ADMIN_PASSWORD`
+- `SEED_ADMIN_NAME`
+
+## Admin Simulation Scaffold
+
+- Admin users can access `/admin/recommendations` in the frontend.
+- Backend summary endpoint: `GET /api/admin/recommendations/overview` (admin-only).
+- The page currently provides read-only KPI/data coverage summaries and placeholder simulation controls for future algorithm testing.
+
+## Post Metadata by Type
+
+Post metadata is now type-specific:
+
+- `regular` (social) posts:
+  - allowed: `brand`, `styleTags`, `colorTags`
+  - disallowed: `category`, `subcategory`, `condition`, `sizeLabel`
+- `market` (marketplace) posts:
+  - required: `category`, `condition`, `sizeLabel` (+ `priceCents`)
+  - optional: `subcategory`, `brand`, `styleTags`, `colorTags`
+
+Metadata options endpoint supports type filtering:
+
+- `GET /api/posts/metadata/options?type=regular`
+- `GET /api/posts/metadata/options?type=market`

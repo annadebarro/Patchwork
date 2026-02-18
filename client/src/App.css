@@ -1017,6 +1017,14 @@ button:disabled {
   font-weight: 600;
 }
 
+.feed-load-more {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+
 /* Sale Badge */
 .sale-badge {
   position: absolute;

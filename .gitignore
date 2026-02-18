@@ -5,3 +5,4 @@ dist
 client/.env
 server/.env
 .DS_Store
+server/backups/db/

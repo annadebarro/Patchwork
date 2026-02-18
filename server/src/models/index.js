@@ -71,6 +71,11 @@ function initModels(sequelize) {
         allowNull: true,
         field: "profile_picture",
       },
+      role: {
+        type: DataTypes.ENUM("user", "admin"),
+        allowNull: false,
+        defaultValue: "user",
+      },
       passwordHash: {
         type: DataTypes.STRING,
         allowNull: false,

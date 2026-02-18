@@ -4,7 +4,7 @@ import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
 import PatchLogo from "../../shared/ui/PatchLogo";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 
-function AuthedLayout({ onLogout, onOpenCreatePost }) {
+function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
   const navigate = useNavigate();
   const [notifPanelOpen, setNotifPanelOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -138,6 +138,18 @@ function AuthedLayout({ onLogout, onOpenCreatePost }) {
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>
           </NavLink>
+          {user?.role === "admin" && (
+            <NavLink
+              to="/admin/recommendations"
+              className={({ isActive }) => `sidebar-icon ${isActive ? "active" : ""}`}
+              title="Admin recommendations"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M7 15l3-3 2 2 5-5" />
+              </svg>
+            </NavLink>
+          )}
           <button
             className={`sidebar-icon sidebar-icon--notif ${notifPanelOpen ? "active" : ""}`}
             title="Notifications"

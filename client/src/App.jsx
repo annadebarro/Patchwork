@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import "./App.css";
 import { API_BASE_URL, parseApiResponse } from "./shared/api/http";
 import RequireAuth from "./shared/ui/RequireAuth";
+import RequireAdmin from "./shared/ui/RequireAdmin";
 import AuthPage from "./features/auth/AuthPage";
 import OnboardingPrompt from "./features/onboarding/OnboardingPrompt";
 import OnboardingPreferencesPage from "./features/onboarding/OnboardingPreferencesPage";
@@ -14,6 +15,7 @@ import MessagesPage from "./features/messages/MessagesPage";
 import UserPage from "./features/profile/UserPage";
 import AccountSettings from "./features/settings/AccountSettings";
 import CreatePostModal from "./features/feed/CreatePostModal";
+import AdminSimulationPage from "./features/admin/AdminSimulationPage";
 
 function App() {
   const navigate = useNavigate();
@@ -262,6 +264,14 @@ function App() {
             element={<UserPage user={user} isOwnProfile refreshKey={postRefreshKey} />}
           />
           <Route path="/settings" element={<AccountSettings user={user} onUpdateUser={setUser} />} />
+          <Route
+            path="/admin/recommendations"
+            element={(
+              <RequireAdmin user={user}>
+                <AdminSimulationPage />
+              </RequireAdmin>
+            )}
+          />
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home" : "/"} replace />} />
       </Routes>
