@@ -217,7 +217,7 @@ function mapPost(post) {
 
 function mapQuilt(quilt) {
   const previewImages = (quilt.patches || [])
-    .map((patch) => patch.post?.imageUrl)
+    .map((patch) => patch.post?.imageUrl || patch.post?.imageUrls?.[0])
     .filter(Boolean)
     .slice(0, 9);
 
@@ -227,6 +227,7 @@ function mapQuilt(quilt) {
     description: quilt.description || "",
     createdAt: quilt.createdAt,
     patchCount: Array.isArray(quilt.patches) ? quilt.patches.length : 0,
+    previewImageUrl: quilt.previewImageUrl || null,
     previewImages,
     owner: quilt.owner
       ? {
