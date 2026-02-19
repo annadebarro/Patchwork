@@ -87,9 +87,10 @@ router.get("/:username", optionalAuthMiddleware, async (req, res) => {
       isPublic: q.isPublic,
       createdAt: q.createdAt,
       patchCount: q.patches.length,
+      previewImageUrl: q.previewImageUrl || null,
       previewImages: q.patches
         .slice(0, 9)
-        .map((p) => p.post?.imageUrl)
+        .map((p) => p.post?.imageUrl || p.post?.imageUrls?.[0])
         .filter(Boolean),
     }));
 

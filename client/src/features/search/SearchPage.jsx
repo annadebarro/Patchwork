@@ -494,9 +494,10 @@ function SearchPage() {
                 {ownerUsername ? `@${ownerUsername}` : "Unknown owner"}
               </span>
               <div className="search-quilt-preview">
-                {(quilt.previewImages || []).slice(0, 4).map((url, index) => (
-                  <img key={`${quilt.id}-preview-${index}`} src={url} alt="" />
-                ))}
+                {(quilt.previewImageUrl ? [quilt.previewImageUrl] : (quilt.previewImages || []).slice(0, 4))
+                  .map((url, index) => (
+                    <img key={`${quilt.id}-preview-${index}`} src={url} alt="" />
+                  ))}
               </div>
               {quilt.description && (
                 <p className="search-quilt-description">{quilt.description}</p>

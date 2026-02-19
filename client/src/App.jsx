@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import "./App.css";
 import { API_BASE_URL, parseApiResponse } from "./shared/api/http";
@@ -30,6 +30,8 @@ function App() {
   const [promptError, setPromptError] = useState("");
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [postRefreshKey, setPostRefreshKey] = useState(0);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const hasMountedRef = useRef(false);
 
   const forceLoading = location.search.includes("loading=1") || location.search.includes("loading=2");
   const showNeedleLoader = location.search.includes("loading=2");
@@ -66,6 +68,17 @@ function App() {
 
     fetchMe();
   }, []);
+
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+
+    setRouteLoading(true);
+    const timeout = setTimeout(() => setRouteLoading(false), 300);
+    return () => clearTimeout(timeout);
+  }, [location.pathname]);
 
   async function handleSignup(event) {
     event.preventDefault();
@@ -198,7 +211,7 @@ function App() {
     }
   }
 
-  if (checkingAuth || forceLoading) {
+  if (checkingAuth || forceLoading || routeLoading) {
     return (
       <div className="loading-container">
         <div className="loading-card">

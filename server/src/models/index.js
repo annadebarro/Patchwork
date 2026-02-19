@@ -548,6 +548,11 @@ function initModels(sequelize) {
         defaultValue: false,
         field: "is_public",
       },
+      previewImageUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "preview_image_url",
+      },
     },
     {
       tableName: "quilts",

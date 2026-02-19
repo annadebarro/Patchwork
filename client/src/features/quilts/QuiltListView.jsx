@@ -17,7 +17,10 @@ function QuiltListView({ quilts, onSelectQuilt, isOwnProfile }) {
           onClick={() => onSelectQuilt(quilt.id)}
         >
           <div className="quilt-list-preview">
-            <GrannySquareGrid images={quilt.previewImages} mini />
+            <GrannySquareGrid
+              images={quilt.previewImageUrl ? [quilt.previewImageUrl] : quilt.previewImages}
+              mini
+            />
           </div>
           <div className="quilt-list-info">
             <h3 className="quilt-list-name">
