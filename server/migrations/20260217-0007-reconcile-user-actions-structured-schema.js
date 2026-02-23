@@ -97,30 +97,9 @@ module.exports = {
   },
 
   async down(queryInterface) {
-    await queryInterface.sequelize.transaction(async (transaction) => {
-      const queryOptions = { transaction };
-
-      await queryInterface.sequelize.query(
-        `
-          DROP INDEX IF EXISTS "user_actions_source_surface_occurred_at_idx";
-          DROP INDEX IF EXISTS "user_actions_target_type_target_id_idx";
-          DROP INDEX IF EXISTS "user_actions_action_type_occurred_at_idx";
-          DROP INDEX IF EXISTS "user_actions_user_id_occurred_at_idx";
-        `,
-        queryOptions
-      );
-
-      await queryInterface.sequelize.query(
-        `
-          ALTER TABLE "user_actions"
-            DROP COLUMN IF EXISTS "session_id",
-            DROP COLUMN IF EXISTS "occurred_at",
-            DROP COLUMN IF EXISTS "source_surface",
-            DROP COLUMN IF EXISTS "metadata_json",
-            DROP COLUMN IF EXISTS "target_type";
-        `,
-        queryOptions
-      );
-    });
+    // Intentionally non-destructive.
+    // These columns/indexes are part of the structured user_actions contract
+    // established by earlier migrations and required by runtime telemetry.
+    return Promise.resolve();
   },
 };

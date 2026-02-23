@@ -30,6 +30,8 @@ function PostsGrid({ type, refreshKey }) {
   const [requestId, setRequestId] = useState(null);
   const telemetryQueueRef = useRef([]);
   const flushTimerRef = useRef(null);
+  const feedRequestEpochRef = useRef(0);
+  const activeLoadMoreControllerRef = useRef(null);
   const feedType = useMemo(() => type || "all", [type]);
 
   const sendTelemetryEvents = useCallback((events, { keepalive = false } = {}) => {
@@ -156,10 +158,22 @@ function PostsGrid({ type, refreshKey }) {
 
   useEffect(() => {
     let isMounted = true;
+    const epoch = feedRequestEpochRef.current + 1;
+    feedRequestEpochRef.current = epoch;
+
+    const controller = new AbortController();
+    if (activeLoadMoreControllerRef.current) {
+      activeLoadMoreControllerRef.current.abort();
+      activeLoadMoreControllerRef.current = null;
+    }
 
     async function fetchPosts() {
       setLoading(true);
       setError("");
+      setLoadingMore(false);
+      setLoadMoreError("");
+      setHasMore(false);
+      setNextOffset(0);
       try {
         const token = localStorage.getItem("token");
         if (!token) {
@@ -177,8 +191,12 @@ function PostsGrid({ type, refreshKey }) {
         const res = await apiFetch(`/recommendations?${params.toString()}`, {
           auth: true,
           surface: REQUEST_SURFACES.SOCIAL_FEED,
+          signal: controller.signal,
         });
         const data = await parseApiResponse(res);
+        if (!isMounted || feedRequestEpochRef.current !== epoch) {
+          return;
+        }
         if (!res.ok) {
           const message = data?.message || `Failed to load posts (${res.status})`;
           if (isMounted) setError(message);
@@ -191,12 +209,12 @@ function PostsGrid({ type, refreshKey }) {
           setNextOffset(
             Number.isFinite(data?.pagination?.nextOffset) ? data.pagination.nextOffset : items.length
           );
-          setLoadMoreError("");
         }
-      } catch {
+      } catch (err) {
+        if (err?.name === "AbortError") return;
         if (isMounted) setError("Network error while loading posts.");
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted && feedRequestEpochRef.current === epoch) setLoading(false);
       }
     }
 
@@ -204,11 +222,19 @@ function PostsGrid({ type, refreshKey }) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [type, refreshKey]);
 
   const handleLoadMore = useCallback(async () => {
     if (loading || loadingMore || !hasMore) return;
+    const epoch = feedRequestEpochRef.current;
+    const controller = new AbortController();
+
+    if (activeLoadMoreControllerRef.current) {
+      activeLoadMoreControllerRef.current.abort();
+    }
+    activeLoadMoreControllerRef.current = controller;
 
     setLoadingMore(true);
     setLoadMoreError("");
@@ -222,8 +248,12 @@ function PostsGrid({ type, refreshKey }) {
       const res = await apiFetch(`/recommendations?${params.toString()}`, {
         auth: true,
         surface: REQUEST_SURFACES.SOCIAL_FEED,
+        signal: controller.signal,
       });
       const data = await parseApiResponse(res);
+      if (feedRequestEpochRef.current !== epoch) {
+        return;
+      }
       if (!res.ok) {
         throw new Error(data?.message || `Failed to load more posts (${res.status})`);
       }
@@ -239,11 +269,26 @@ function PostsGrid({ type, refreshKey }) {
           : nextOffset + items.length
       );
     } catch (err) {
+      if (err?.name === "AbortError") return;
       setLoadMoreError(err?.message || "Failed to load more posts.");
     } finally {
-      setLoadingMore(false);
+      if (activeLoadMoreControllerRef.current === controller) {
+        activeLoadMoreControllerRef.current = null;
+      }
+      if (feedRequestEpochRef.current === epoch) {
+        setLoadingMore(false);
+      }
     }
   }, [hasMore, loading, loadingMore, mergePosts, nextOffset, type]);
+
+  useEffect(() => {
+    return () => {
+      if (activeLoadMoreControllerRef.current) {
+        activeLoadMoreControllerRef.current.abort();
+        activeLoadMoreControllerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     function onPageHide() {
