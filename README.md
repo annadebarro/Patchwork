@@ -120,6 +120,18 @@ npm run db:migrate --prefix server
 - Canonical KPI semantics spec for recommender/testing work:
   - `/Users/jacklund/Documents/CS/CS422/Patchwork/documents/recommendation-kpi-spec.md`
 
+## Recommendation Engine v1
+
+- Feed ranking now attempts `hybrid_v1` by default at `GET /api/recommendations`.
+- If hybrid ranking fails at runtime, the API automatically fails open to `chronological_fallback`.
+- Ranking remains type-aware (`regular`, `market`) and telemetry contract is unchanged.
+- Runtime ranking weights/blend settings are now loaded from the active DB config (`recommendation_configs`).
+- If config lookup fails, the ranker uses built-in defaults and continues serving.
+- Response payload includes:
+  - `algorithm` (`hybrid_v1` or `chronological_fallback`)
+  - `personalized` boolean
+  - pagination metadata (`limit`, `offset`, `hasMore`, `nextOffset`)
+
 ## Project Structure
 
 - `server/` — Express API with Postgres (Sequelize) connection (entry: `src/server.js`)
@@ -184,9 +196,22 @@ Admin credentials can be overridden with environment variables:
 
 ## Admin Simulation Scaffold
 
-- Admin users can access `/admin/recommendations` in the frontend.
-- Backend summary endpoint: `GET /api/admin/recommendations/overview` (admin-only).
-- The page currently provides read-only KPI/data coverage summaries and placeholder simulation controls for future algorithm testing.
+- Admin users can access `/admin/recommendations` in the frontend analytics dashboard.
+- Dashboard mode supports:
+  - `replay` simulation: evaluates on observed telemetry candidate sets.
+  - `synthetic` simulation: deterministic persona-driven sessions on real DB posts (no synthetic writes to `user_actions`).
+- Backend endpoints (admin-only):
+  - `GET /api/admin/recommendations/overview`
+  - `GET /api/admin/recommendations/simulate?days=14&type=all|regular|market&k=20` (compat replay route)
+  - `POST /api/admin/recommendations/simulate`
+  - `GET /api/admin/recommendations/runs?limit=40`
+  - `GET /api/admin/recommendations/config/active`
+  - `GET /api/admin/recommendations/config/history?limit=25`
+  - `POST /api/admin/recommendations/config/apply` (`confirm: "APPLY"`)
+  - `POST /api/admin/recommendations/config/rollback` (`confirm: "ROLLBACK"`)
+- Simulation responses include baseline/candidate/delta metrics, coverage diagnostics, slices, and synthetic sample journeys (synthetic mode).
+- Simulation summaries are persisted to `recommendation_simulation_runs` for trend charts.
+- Config changes are versioned in `recommendation_configs` with active-version rollback support.
 
 ## Post Metadata by Type
 
