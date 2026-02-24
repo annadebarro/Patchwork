@@ -147,3 +147,85 @@ test("recommendations telemetry accepts valid events and drops invalid entries",
     assert.equal(payload.droppedCount, 1);
   });
 });
+
+test("recommendations route exposes debug scoring only for admin users", async () => {
+  await withServer(async ({ app, port }) => {
+    let capturedDebugTopN = null;
+    app.use(
+      "/api/recommendations",
+      buildRecommendationsRouter({
+        getModelsFn: () => ({}),
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user", role: "admin" };
+          next();
+        },
+        fetchHybridFn: async ({ debugTopN }) => {
+          capturedDebugTopN = debugTopN;
+          return {
+            algorithm: "hybrid_v1",
+            personalized: true,
+            posts: [{ id: "post-1" }],
+            hasMore: false,
+            nextOffset: null,
+            debug: {
+              top: [{ rank: 1, postId: "post-1", score: 1.234 }],
+            },
+            timings: {
+              profileMs: 5,
+              candidateFetchMs: 8,
+              scoringMs: 9,
+              totalMs: 22,
+            },
+          };
+        },
+      })
+    );
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/recommendations?limit=1&offset=0&debugTopN=3`
+    );
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.equal(capturedDebugTopN, 3);
+    assert.deepEqual(payload.debug.top, [{ rank: 1, postId: "post-1", score: 1.234 }]);
+  });
+
+  await withServer(async ({ app, port }) => {
+    let capturedDebugTopN = null;
+    app.use(
+      "/api/recommendations",
+      buildRecommendationsRouter({
+        getModelsFn: () => ({}),
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "user-1", role: "user" };
+          next();
+        },
+        fetchHybridFn: async ({ debugTopN }) => {
+          capturedDebugTopN = debugTopN;
+          return {
+            algorithm: "hybrid_v1",
+            personalized: true,
+            posts: [{ id: "post-1" }],
+            hasMore: false,
+            nextOffset: null,
+            debug: { top: [{ rank: 1, postId: "post-1" }] },
+            timings: {
+              profileMs: 5,
+              candidateFetchMs: 8,
+              scoringMs: 9,
+              totalMs: 22,
+            },
+          };
+        },
+      })
+    );
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/recommendations?limit=1&offset=0&debugTopN=3`
+    );
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.equal(capturedDebugTopN, 0);
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, "debug"), false);
+  });
+});
