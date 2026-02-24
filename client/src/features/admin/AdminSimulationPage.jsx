@@ -77,6 +77,102 @@ function metricClass(value) {
   return value > 0 ? "positive" : "negative";
 }
 
+function buildSliceLabel(slice) {
+  const feedType = typeof slice?.feedType === "string" && slice.feedType.trim()
+    ? slice.feedType.trim()
+    : "unknown";
+  const cohort = typeof slice?.cohort === "string" && slice.cohort.trim()
+    ? slice.cohort.trim()
+    : "unknown";
+  const sourceSurface = typeof slice?.sourceSurface === "string" && slice.sourceSurface.trim()
+    ? slice.sourceSurface.trim()
+    : null;
+  const personaType = typeof slice?.personaType === "string" && slice.personaType.trim()
+    ? slice.personaType.trim()
+    : null;
+
+  const label = `${feedType}/${cohort}`;
+  const suffix = [];
+
+  if (personaType) {
+    suffix.push(personaType);
+  } else if (sourceSurface && sourceSurface !== "unknown") {
+    suffix.push(sourceSurface);
+  }
+
+  return suffix.length ? `${label} • ${suffix.join(" • ")}` : label;
+}
+
+function abbreviateSliceLabel(slice) {
+  const feedType = String(slice?.feedType || "").trim().toLowerCase();
+  const cohort = String(slice?.cohort || "").trim().toLowerCase();
+  const personaType = String(slice?.personaType || "").trim().toLowerCase();
+  const sourceSurface = String(slice?.sourceSurface || "").trim().toLowerCase();
+
+  const feedShort = feedType === "market" ? "mkt" : feedType === "regular" ? "reg" : feedType || "unk";
+  const cohortShort = cohort === "returning" ? "ret" : cohort === "new" ? "new" : cohort || "unk";
+
+  const personaShort = personaType
+    ? personaType
+        .replace(/_focused$/i, "")
+        .replace(/regular/i, "reg")
+        .replace(/market/i, "mkt")
+        .replace(/cold_start/i, "cold")
+        .replace(/mixed/i, "mix")
+    : "";
+
+  const surfaceShort = sourceSurface
+    ? sourceSurface
+        .replace(/social_feed/i, "feed")
+        .replace(/post_detail/i, "detail")
+        .replace(/search_results/i, "search")
+        .replace(/profile/i, "profile")
+    : "";
+
+  const suffix = personaShort || (surfaceShort && surfaceShort !== "unknown" ? surfaceShort : "");
+  return suffix ? `${feedShort}/${cohortShort}•${suffix}` : `${feedShort}/${cohortShort}`;
+}
+
+const TOOLTIP_PROPS = Object.freeze({
+  contentStyle: {
+    background: "rgba(7, 12, 24, 0.95)",
+    border: "1px solid rgba(140, 169, 255, 0.35)",
+    borderRadius: 12,
+    boxShadow: "0 20px 55px rgba(0, 0, 0, 0.35)",
+  },
+  labelStyle: {
+    color: "var(--secondary)",
+    fontWeight: 700,
+  },
+  itemStyle: {
+    color: "var(--secondary)",
+  },
+});
+
+function SliceTooltip({ active, payload }) {
+  if (!active || !Array.isArray(payload) || payload.length === 0) return null;
+  const row = payload[0]?.payload;
+  const label = row?.sliceFull || row?.sliceShort || "";
+  const value = Number(row?.deltaNdcg || 0);
+
+  return (
+    <div style={TOOLTIP_PROPS.contentStyle}>
+      <div style={{ ...TOOLTIP_PROPS.labelStyle, marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ ...TOOLTIP_PROPS.itemStyle, opacity: 0.9 }}>dNDCG</span>
+        <span style={{ color: payload[0]?.color || "var(--secondary)", fontWeight: 700 }}>
+          {Number.isFinite(value) ? value.toFixed(4) : "0.0000"}
+        </span>
+      </div>
+      {Number.isFinite(Number(row?.requests)) ? (
+        <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 12 }}>
+          requests {Number(row.requests)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 async function fetchAuthed(path, options = {}) {
   const res = await apiFetch(path, {
     auth: true,
@@ -311,7 +407,8 @@ function AdminSimulationPage() {
   const sliceChartData = useMemo(() => {
     if (!Array.isArray(simulation?.slices)) return [];
     return simulation.slices.slice(0, 10).map((slice) => ({
-      slice: `${slice.feedType}/${slice.cohort}`,
+      sliceShort: abbreviateSliceLabel(slice),
+      sliceFull: buildSliceLabel(slice),
       deltaNdcg: Number(slice?.delta?.ndcgAtK || 0),
       requests: Number(slice?.candidate?.requests || 0),
     }));
@@ -765,7 +862,7 @@ function AdminSimulationPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                       <XAxis dataKey="metric" stroke="#9db0d9" />
                       <YAxis stroke="#9db0d9" />
-                      <Tooltip />
+                      <Tooltip {...TOOLTIP_PROPS} />
                       <Legend />
                       <Bar dataKey="baseline" name="baseline" fill="#607194" radius={[6, 6, 0, 0]} />
                       <Bar dataKey="candidate" name="candidate" fill="#31d0aa" radius={[6, 6, 0, 0]} />
@@ -795,7 +892,7 @@ function AdminSimulationPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                       <XAxis dataKey="metric" stroke="#9db0d9" />
                       <YAxis stroke="#9db0d9" />
-                      <Tooltip />
+                      <Tooltip {...TOOLTIP_PROPS} />
                       <Bar dataKey="delta" fill="#f2b84b" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -810,9 +907,17 @@ function AdminSimulationPage() {
                   <ResponsiveContainer width="100%" height={280}>
                     <BarChart data={sliceChartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
-                      <XAxis dataKey="slice" stroke="#9db0d9" interval={0} angle={-18} textAnchor="end" height={68} />
+                      <XAxis
+                        dataKey="sliceShort"
+                        stroke="#9db0d9"
+                        tick={{ fill: "#9db0d9", fontSize: 11 }}
+                        interval={0}
+                        angle={-18}
+                        textAnchor="end"
+                        height={58}
+                      />
                       <YAxis stroke="#9db0d9" />
-                      <Tooltip />
+                      <Tooltip content={<SliceTooltip />} />
                       <Bar dataKey="deltaNdcg" name="dNDCG" fill="#5ca2ff" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -829,7 +934,7 @@ function AdminSimulationPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                       <XAxis dataKey="label" stroke="#9db0d9" interval={0} angle={-18} textAnchor="end" height={72} />
                       <YAxis stroke="#9db0d9" />
-                      <Tooltip />
+                      <Tooltip {...TOOLTIP_PROPS} />
                       <Bar dataKey="value" fill="#d272f6" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -849,7 +954,7 @@ function AdminSimulationPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
                       <XAxis dataKey="index" stroke="#9db0d9" />
                       <YAxis stroke="#9db0d9" />
-                      <Tooltip />
+                      <Tooltip {...TOOLTIP_PROPS} />
                       <Legend />
                       <Line
                         type="monotone"
