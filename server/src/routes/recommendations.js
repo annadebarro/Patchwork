@@ -20,6 +20,7 @@ const FEED_TELEMETRY_ACTIONS = new Set([
   ACTION_TYPES.FEED_DWELL,
 ]);
 const MAX_TELEMETRY_EVENTS = 100;
+const MAX_DEBUG_TOP_N = 20;
 
 function parseOccurredAt(value) {
   const occurredAt = new Date(value);
@@ -31,6 +32,13 @@ function toTrimmedString(value) {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized ? normalized : null;
+}
+
+function parseDebugTopN(queryValue, isAdmin) {
+  if (!isAdmin) return 0;
+  const parsed = Number.parseInt(queryValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(parsed, MAX_DEBUG_TOP_N);
 }
 
 function toTimingLogString(timings = {}) {
@@ -59,6 +67,7 @@ function buildRecommendationsRouter({
     }
 
     const { limit, offset } = parseRecommendationPaging(req.query);
+    const debugTopN = parseDebugTopN(req.query?.debugTopN, req.user?.role === "admin");
     const requestId = randomUUID();
 
     let hybridError = null;
@@ -71,6 +80,7 @@ function buildRecommendationsRouter({
         limit,
         offset,
         userId: req.user.id,
+        debugTopN,
       });
 
       console.info(
@@ -88,6 +98,7 @@ function buildRecommendationsRouter({
           hasMore: Boolean(result.hasMore),
           nextOffset: result.nextOffset ?? (result.hasMore ? offset + result.posts.length : null),
         },
+        ...(debugTopN > 0 && result.debug ? { debug: result.debug } : {}),
       });
     } catch (err) {
       hybridError = err;

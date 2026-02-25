@@ -15,6 +15,7 @@ const { getActiveConfig } = require("./recommendationConfig");
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
+const MAX_DEBUG_TOP_N = 20;
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -37,6 +38,37 @@ function parseRecommendationPaging(query) {
     limit: clamp(toInt(query?.limit, DEFAULT_LIMIT), 1, MAX_LIMIT),
     offset: clamp(toInt(query?.offset, 0), 0, 10000),
   };
+}
+
+function roundMetric(value, digits = 4) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Number(numeric.toFixed(digits));
+}
+
+function buildDebugTopScored(scoredEntries, topN) {
+  const safeTopN = clamp(Number.parseInt(topN, 10) || 0, 0, MAX_DEBUG_TOP_N);
+  if (!safeTopN) return [];
+
+  return (scoredEntries || []).slice(0, safeTopN).map((entry, index) => ({
+    rank: index + 1,
+    postId: entry?.post?.id || null,
+    authorId: entry?.post?.author?.id || null,
+    type: entry?.type || entry?.post?.type || null,
+    score: roundMetric(entry?.score, 6),
+    components: Object.fromEntries(
+      Object.entries(entry?.components || {}).map(([key, value]) => [key, roundMetric(value, 6)])
+    ),
+    weights: Object.fromEntries(
+      Object.entries(entry?.weights || {}).map(([key, value]) => [key, roundMetric(value, 6)])
+    ),
+    diagnostics: {
+      coldStartMode: Boolean(entry?.diagnostics?.coldStartMode),
+      historyConfidence: roundMetric(entry?.diagnostics?.historyConfidence, 6),
+      regularSignalStrength: roundMetric(entry?.diagnostics?.regularSignalStrength, 6),
+      marketSignalStrength: roundMetric(entry?.diagnostics?.marketSignalStrength, 6),
+    },
+  }));
 }
 
 async function resolveRuntimeConfig(models) {
@@ -104,7 +136,15 @@ async function fetchChronologicalRecommendations({ models, type, limit, offset, 
   };
 }
 
-async function fetchHybridRecommendations({ models, type, limit, offset, userId, now = new Date() }) {
+async function fetchHybridRecommendations({
+  models,
+  type,
+  limit,
+  offset,
+  userId,
+  now = new Date(),
+  debugTopN = 0,
+}) {
   const totalStartMs = Date.now();
   const runtimeConfig = await resolveRuntimeConfig(models);
 
@@ -129,6 +169,7 @@ async function fetchHybridRecommendations({ models, type, limit, offset, userId,
     userId,
     type,
     limitPerType: dynamicPoolLimit,
+    followedAuthorIds: [...(profile?.followedAuthorSet || [])],
     now,
     config: runtimeConfig.config,
   });
@@ -165,6 +206,20 @@ async function fetchHybridRecommendations({ models, type, limit, offset, userId,
     nextOffset: hasMore ? offset + pagedPosts.length : null,
     mix: blended.mix,
     configVersion: runtimeConfig.version,
+    debug:
+      Number(debugTopN) > 0
+        ? {
+            top: buildDebugTopScored(blended.scored, debugTopN),
+            profile: {
+              coldStartMode: Boolean(profile?.coldStartMode),
+              relevantActionCount: Number(profile?.relevantActionCount || 0),
+              marketShare: roundMetric(profile?.marketShare, 6),
+              regularSignalStrength: roundMetric(profile?.regularSignalStrength, 6),
+              marketSignalStrength: roundMetric(profile?.marketSignalStrength, 6),
+              followedAuthorCount: profile?.followedAuthorSet?.size || 0,
+            },
+          }
+        : null,
     timings: {
       profileMs,
       candidateFetchMs,

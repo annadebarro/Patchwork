@@ -9,6 +9,7 @@ const {
   blendAndDiversify,
   fetchCandidatePools,
   filterUuidLike,
+  scoreMarketPost,
   scoreRegularPost,
   toPriceBand,
 } = require("./recommendationEngine");
@@ -150,6 +151,106 @@ test("fetchCandidatePools applies own-post and sold filters", async () => {
   assert.equal(result.marketCandidates.length, 1);
   assert.equal(result.regularCandidates[0]._engagementVelocity, 0);
   assert.equal(result.marketCandidates[0]._engagementVelocity, 0);
+});
+
+test("fetchCandidatePools boosts followed authors into candidate pool", async () => {
+  const makePost = (id, type, authorId) => ({
+    toJSON: () => ({
+      id,
+      type,
+      author: { id: authorId },
+      createdAt: new Date().toISOString(),
+      styleTags: [],
+      colorTags: [],
+      brand: "",
+      category: "unknown",
+      condition: "unknown",
+      sizeLabel: "unknown",
+      priceCents: null,
+    }),
+  });
+
+  const models = {
+    User: {},
+    Follow: {
+      findAll: async () => [{ followeeId: "followed-author" }],
+    },
+    Post: {
+      sequelize: {
+        query: async () => [],
+      },
+      findAll: async ({ where }) => {
+        const isBoostQuery = Boolean(where?.userId?.[Op.in]);
+        if (where.type === "regular") {
+          return isBoostQuery
+            ? [makePost("regular-followed", "regular", "followed-author")]
+            : [makePost("regular-base", "regular", "other-author")];
+        }
+
+        return isBoostQuery
+          ? [makePost("market-followed", "market", "followed-author")]
+          : [makePost("market-base", "market", "other-author")];
+      },
+    },
+  };
+
+  const result = await fetchCandidatePools({
+    models,
+    userId: "viewer-1",
+    type: null,
+    limitPerType: 2,
+    now: new Date(),
+  });
+
+  assert.equal(result.regularCandidates[0].author.id, "followed-author");
+  assert.equal(result.marketCandidates[0].author.id, "followed-author");
+});
+
+test("scoreMarketPost shifts weight to stable signals for low market intent", () => {
+  const now = new Date("2026-02-18T00:00:00.000Z");
+  const post = {
+    id: "post-market-1",
+    type: "market",
+    createdAt: "2026-02-10T00:00:00.000Z",
+    category: "tops",
+    brand: "nike",
+    sizeLabel: "m",
+    condition: "like_new",
+    priceCents: 6400,
+    author: { id: "author-1" },
+    _engagementVelocity: 0.7,
+  };
+
+  const lowIntentProfile = createProfile({
+    relevantActionCount: 22,
+    marketShare: 0.2,
+    categoryAffinity: new Map(),
+    sizeAffinity: new Map(),
+    priceBandAffinity: new Map(),
+    conditionAffinity: new Map(),
+    brandAffinity: new Map(),
+  });
+
+  const highIntentProfile = createProfile({
+    relevantActionCount: 40,
+    marketShare: 0.85,
+    marketSignalStrength: 0.95,
+    categoryAffinity: new Map([["tops", 1]]),
+    sizeAffinity: new Map([["m", 1]]),
+    priceBandAffinity: new Map([["mid", 1]]),
+    conditionAffinity: new Map([["like_new", 1]]),
+    brandAffinity: new Map([["nike", 1]]),
+  });
+
+  const lowIntentScore = scoreMarketPost(post, { profile: lowIntentProfile, now });
+  const highIntentScore = scoreMarketPost(post, { profile: highIntentProfile, now });
+
+  assert.ok(lowIntentScore.weights.categoryMatch < highIntentScore.weights.categoryMatch);
+  assert.ok(lowIntentScore.weights.sizeMatch < highIntentScore.weights.sizeMatch);
+  assert.ok(lowIntentScore.weights.priceBandMatch < highIntentScore.weights.priceBandMatch);
+  assert.ok(lowIntentScore.weights.conditionMatch < highIntentScore.weights.conditionMatch);
+  assert.ok(lowIntentScore.weights.freshness > highIntentScore.weights.freshness);
+  assert.ok(lowIntentScore.weights.engagementVelocity > highIntentScore.weights.engagementVelocity);
 });
 
 test("filterUuidLike drops invalid IDs", () => {

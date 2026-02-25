@@ -66,6 +66,10 @@ const DEFAULT_RECOMMENDATION_CONFIG = Object.freeze({
 const ACTION_SIGNAL_WEIGHTS = DEFAULT_ACTION_SIGNAL_WEIGHTS;
 const DEFAULT_MARKET_SHARE = DEFAULT_RECOMMENDATION_CONFIG.blend.defaultMarketShare;
 const DEFAULT_LIMIT_PER_TYPE = DEFAULT_RECOMMENDATION_CONFIG.pools.defaultLimitPerType;
+const COLD_START_ACTION_THRESHOLD = 8;
+const FULL_HISTORY_ACTION_THRESHOLD = 28;
+const FOLLOWED_AUTHOR_CANDIDATE_LIMIT = 150;
+const MAX_FOLLOWED_AUTHOR_IDS = 300;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -151,6 +155,111 @@ function normalizeAffinityMap(rawMap) {
   }
 
   return normalized;
+}
+
+function getMapStrength(affinityMap) {
+  if (!(affinityMap instanceof Map) || affinityMap.size === 0) return 0;
+
+  let max = 0;
+  let sum = 0;
+  let count = 0;
+  for (const value of affinityMap.values()) {
+    const normalized = clamp(Number(value) || 0, 0, 1);
+    if (normalized <= 0) continue;
+    max = Math.max(max, normalized);
+    sum += normalized;
+    count += 1;
+  }
+
+  if (count === 0) return 0;
+  const average = sum / count;
+  const density = clamp(count / 6, 0, 1);
+  return clamp((average * 0.6 + max * 0.4) * (0.55 + density * 0.45), 0, 1);
+}
+
+function getHistoryConfidence(profile) {
+  const relevantActionCount = Number(profile?.relevantActionCount || 0);
+  return clamp(relevantActionCount / FULL_HISTORY_ACTION_THRESHOLD, 0, 1);
+}
+
+function isColdStartProfile(profile) {
+  const relevantActionCount = Number(profile?.relevantActionCount || 0);
+  return relevantActionCount < COLD_START_ACTION_THRESHOLD;
+}
+
+function resolveRegularSignalStrength(profile) {
+  if (Number.isFinite(Number(profile?.regularSignalStrength))) {
+    return clamp(Number(profile.regularSignalStrength), 0, 1);
+  }
+
+  return clamp(
+    getMapStrength(profile?.styleAffinity) * 0.35 +
+      getMapStrength(profile?.colorAffinity) * 0.25 +
+      getMapStrength(profile?.brandAffinity) * 0.2 +
+      getMapStrength(profile?.authorAffinity) * 0.2,
+    0,
+    1
+  );
+}
+
+function resolveMarketSignalStrength(profile) {
+  if (Number.isFinite(Number(profile?.marketSignalStrength))) {
+    return clamp(Number(profile.marketSignalStrength), 0, 1);
+  }
+
+  return clamp(
+    getMapStrength(profile?.categoryAffinity) * 0.22 +
+      getMapStrength(profile?.sizeAffinity) * 0.2 +
+      getMapStrength(profile?.priceBandAffinity) * 0.2 +
+      getMapStrength(profile?.conditionAffinity) * 0.18 +
+      getMapStrength(profile?.brandAffinity) * 0.1 +
+      getMapStrength(profile?.authorAffinity) * 0.1,
+    0,
+    1
+  );
+}
+
+function buildRegularWeights(baseWeights, profile) {
+  const historyConfidence = getHistoryConfidence(profile);
+  const coldStartFactor = 1 - historyConfidence;
+  const regularSignalStrength = resolveRegularSignalStrength(profile);
+  const affinityScale = 0.35 + historyConfidence * 0.65;
+  const velocityDampingFromAffinity = 1 - regularSignalStrength * 0.35;
+
+  return {
+    followAff: baseWeights.followAff * (1 + coldStartFactor * 0.12),
+    authorAff: baseWeights.authorAff * affinityScale,
+    styleMatch: baseWeights.styleMatch * affinityScale,
+    colorMatch: baseWeights.colorMatch * affinityScale,
+    brandMatch: baseWeights.brandMatch * affinityScale,
+    engagementVelocity:
+      baseWeights.engagementVelocity * (1 + coldStartFactor * 0.45) * velocityDampingFromAffinity,
+    freshness: baseWeights.freshness * (1 + coldStartFactor * 0.25),
+  };
+}
+
+function buildMarketWeights(baseWeights, profile) {
+  const historyConfidence = getHistoryConfidence(profile);
+  const marketSignalStrength = resolveMarketSignalStrength(profile);
+  const marketShare = clamp(Number(profile?.marketShare || DEFAULT_MARKET_SHARE), 0, 1);
+
+  // When market-specific history is weak, shift weight toward stable signals.
+  const intentConfidence = clamp(marketSignalStrength * 0.75 + marketShare * 0.25, 0, 1);
+  const lowIntentFactor = 1 - Math.min(historyConfidence, intentConfidence);
+  const marketMatchScale = 0.15 + Math.min(historyConfidence, intentConfidence) * 0.85;
+
+  return {
+    followAff: baseWeights.followAff * (1 + lowIntentFactor * 0.3),
+    authorAff: baseWeights.authorAff * (0.45 + historyConfidence * 0.55),
+    categoryMatch: baseWeights.categoryMatch * marketMatchScale,
+    brandMatch: baseWeights.brandMatch * (0.3 + Math.max(marketMatchScale, historyConfidence) * 0.7),
+    sizeMatch: baseWeights.sizeMatch * marketMatchScale,
+    priceBandMatch: baseWeights.priceBandMatch * marketMatchScale,
+    conditionMatch: baseWeights.conditionMatch * marketMatchScale,
+    engagementVelocity:
+      baseWeights.engagementVelocity * (1 + lowIntentFactor * 0.5) * (1 - marketSignalStrength * 0.25),
+    freshness: baseWeights.freshness * (1 + lowIntentFactor * 0.45),
+  };
 }
 
 function pickPostIdFromAction(action) {
@@ -304,8 +413,9 @@ function buildInterleavedQueue(regularRanked, marketRanked, marketShare) {
 
 function scoreRegularPost(post, context) {
   const config = getEffectiveConfig(context?.config);
-  const weights = config.regularWeights;
   const profile = context.profile;
+  const weights = buildRegularWeights(config.regularWeights, profile);
+  const historyConfidence = getHistoryConfidence(profile);
   const authorId = post?.author?.id;
 
   const components = {
@@ -332,13 +442,20 @@ function scoreRegularPost(post, context) {
     type: "regular",
     score,
     components,
+    weights,
+    diagnostics: {
+      coldStartMode: isColdStartProfile(profile),
+      historyConfidence,
+      regularSignalStrength: resolveRegularSignalStrength(profile),
+    },
   };
 }
 
 function scoreMarketPost(post, context) {
   const config = getEffectiveConfig(context?.config);
-  const weights = config.marketWeights;
   const profile = context.profile;
+  const weights = buildMarketWeights(config.marketWeights, profile);
+  const historyConfidence = getHistoryConfidence(profile);
   const authorId = post?.author?.id;
   const priceBand = toPriceBand(post.priceCents);
 
@@ -370,6 +487,12 @@ function scoreMarketPost(post, context) {
     type: "market",
     score,
     components,
+    weights,
+    diagnostics: {
+      coldStartMode: isColdStartProfile(profile),
+      historyConfidence,
+      marketSignalStrength: resolveMarketSignalStrength(profile),
+    },
   };
 }
 
@@ -511,6 +634,7 @@ async function fetchCandidatePools({
   userId,
   type,
   limitPerType,
+  followedAuthorIds,
   now = new Date(),
   config,
 } = {}) {
@@ -549,7 +673,13 @@ async function fetchCandidatePools({
     },
   ];
 
-  const [regularRows, marketRows] = await Promise.all([
+  const followedAuthorList = Array.isArray(followedAuthorIds)
+    ? followedAuthorIds
+        .filter((followeeId) => typeof followeeId === "string" && followeeId && followeeId !== userId)
+        .slice(0, MAX_FOLLOWED_AUTHOR_IDS)
+    : null;
+
+  const [regularRows, marketRows, followRows] = await Promise.all([
     requestedType === "market"
       ? Promise.resolve([])
       : models.Post.findAll({
@@ -566,10 +696,68 @@ async function fetchCandidatePools({
           include,
           limit: safeLimit,
         }),
+    followedAuthorList
+      ? Promise.resolve([])
+      : models?.Follow?.findAll && userId
+      ? models.Follow.findAll({
+          where: { followerId: userId },
+          attributes: ["followeeId"],
+          raw: true,
+          limit: MAX_FOLLOWED_AUTHOR_IDS,
+        })
+      : Promise.resolve([]),
   ]);
 
-  const regularCandidates = regularRows.map((row) => row.toJSON());
-  const marketCandidates = marketRows.map((row) => row.toJSON());
+  const resolvedFollowedAuthorIds = followedAuthorList || [
+    ...new Set(
+      (followRows || [])
+        .map((row) => row.followeeId)
+        .filter((followeeId) => typeof followeeId === "string" && followeeId && followeeId !== userId)
+    ),
+  ];
+
+  const [regularBoostRows, marketBoostRows] = resolvedFollowedAuthorIds.length > 0
+    ? await Promise.all([
+        requestedType === "market"
+          ? Promise.resolve([])
+          : models.Post.findAll({
+              where: {
+                ...regularWhere,
+                userId: { [Op.in]: resolvedFollowedAuthorIds },
+              },
+              order: [["createdAt", "DESC"]],
+              include,
+              limit: FOLLOWED_AUTHOR_CANDIDATE_LIMIT,
+            }),
+        requestedType === "regular"
+          ? Promise.resolve([])
+          : models.Post.findAll({
+              where: {
+                ...marketWhere,
+                userId: { [Op.in]: resolvedFollowedAuthorIds },
+              },
+              order: [["createdAt", "DESC"]],
+              include,
+              limit: FOLLOWED_AUTHOR_CANDIDATE_LIMIT,
+            }),
+      ])
+    : [[], []];
+
+  function buildMergedCandidates(priorityRows, baseRows) {
+    const merged = [];
+    const seen = new Set();
+    for (const row of [...priorityRows, ...baseRows]) {
+      const candidate = row?.toJSON ? row.toJSON() : row;
+      if (!candidate?.id || seen.has(candidate.id)) continue;
+      seen.add(candidate.id);
+      merged.push(candidate);
+      if (merged.length >= safeLimit) break;
+    }
+    return merged;
+  }
+
+  const regularCandidates = buildMergedCandidates(regularBoostRows, regularRows);
+  const marketCandidates = buildMergedCandidates(marketBoostRows, marketRows);
 
   const engagementMap = await buildEngagementVelocityByPostId({
     models,
@@ -741,19 +929,50 @@ async function buildUserPreferenceProfile({ models, userId, now = new Date(), co
   const positiveTotal = regularPositiveWeight + marketPositiveWeight;
   const fallbackShare = blendConfig.defaultMarketShare;
   const marketShare = positiveTotal > 0 ? marketPositiveWeight / positiveTotal : fallbackShare;
+  const authorAffinity = normalizeAffinityMap(authorRaw);
+  const categoryAffinity = normalizeAffinityMap(categoryRaw);
+  const brandAffinity = normalizeAffinityMap(brandRaw);
+  const styleAffinity = normalizeAffinityMap(styleRaw);
+  const colorAffinity = normalizeAffinityMap(colorRaw);
+  const sizeAffinity = normalizeAffinityMap(sizeRaw);
+  const priceBandAffinity = normalizeAffinityMap(priceBandRaw);
+  const conditionAffinity = normalizeAffinityMap(conditionRaw);
+
+  const regularSignalStrength = clamp(
+    getMapStrength(styleAffinity) * 0.35 +
+      getMapStrength(colorAffinity) * 0.25 +
+      getMapStrength(brandAffinity) * 0.2 +
+      getMapStrength(authorAffinity) * 0.2,
+    0,
+    1
+  );
+
+  const marketSignalStrength = clamp(
+    getMapStrength(categoryAffinity) * 0.22 +
+      getMapStrength(sizeAffinity) * 0.2 +
+      getMapStrength(priceBandAffinity) * 0.2 +
+      getMapStrength(conditionAffinity) * 0.18 +
+      getMapStrength(brandAffinity) * 0.1 +
+      getMapStrength(authorAffinity) * 0.1,
+    0,
+    1
+  );
 
   return {
     followedAuthorSet,
-    authorAffinity: normalizeAffinityMap(authorRaw),
-    categoryAffinity: normalizeAffinityMap(categoryRaw),
-    brandAffinity: normalizeAffinityMap(brandRaw),
-    styleAffinity: normalizeAffinityMap(styleRaw),
-    colorAffinity: normalizeAffinityMap(colorRaw),
-    sizeAffinity: normalizeAffinityMap(sizeRaw),
-    priceBandAffinity: normalizeAffinityMap(priceBandRaw),
-    conditionAffinity: normalizeAffinityMap(conditionRaw),
+    authorAffinity,
+    categoryAffinity,
+    brandAffinity,
+    styleAffinity,
+    colorAffinity,
+    sizeAffinity,
+    priceBandAffinity,
+    conditionAffinity,
     marketShare: clamp(marketShare, blendConfig.minMarketShare, blendConfig.maxMarketShare),
     relevantActionCount,
+    coldStartMode: relevantActionCount < COLD_START_ACTION_THRESHOLD,
+    regularSignalStrength,
+    marketSignalStrength,
   };
 }
 
