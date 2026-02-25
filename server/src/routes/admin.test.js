@@ -149,3 +149,218 @@ test("admin route supports legacy user_actions schema without telemetry columns"
     assert.equal(payload.overview.telemetryCoverage.withRequestId, 0);
   });
 });
+
+test("admin simulation route validates type query", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+        buildRecommendationSimulationFn: async () => ({ ok: true }),
+        createSimulationRunFn: async () => ({ id: "run-1" }),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/simulate?type=invalid`);
+    assert.equal(res.status, 400);
+    const payload = await res.json();
+    assert.match(payload.message, /type must be one of all, regular, or market/i);
+  });
+});
+
+test("admin simulation route returns simulation payload for admins", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+        buildRecommendationSimulationFn: async ({ days, type, k }) => ({
+          generatedAt: new Date().toISOString(),
+          params: { days, type, k },
+          baseline: { requests: 10, ndcgAtK: 0.2, mrrAtK: 0.1, weightedGainAtK: 1.2 },
+          candidate: { requests: 10, ndcgAtK: 0.3, mrrAtK: 0.2, weightedGainAtK: 1.8 },
+          delta: { requests: 10, ndcgAtK: 0.1, mrrAtK: 0.1, weightedGainAtK: 0.6 },
+          coverage: { groupsEvaluated: 10 },
+          slices: [],
+        }),
+        createSimulationRunFn: async () => ({ id: "run-2" }),
+      })
+    );
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/admin/recommendations/simulate?days=7&type=regular&k=15`
+    );
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.equal(payload.simulation.params.days, 7);
+    assert.equal(payload.simulation.params.type, "regular");
+    assert.equal(payload.simulation.params.k, 15);
+    assert.equal(payload.simulation.delta.ndcgAtK, 0.1);
+  });
+});
+
+test("admin simulation POST supports synthetic mode payload", async () => {
+  await withServer(async ({ app, port }) => {
+    let captured = null;
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+        buildRecommendationSimulationFn: async (input) => {
+          captured = input;
+          return {
+            mode: "synthetic",
+            generatedAt: new Date().toISOString(),
+            params: input.params,
+            baseline: { requests: 10, ndcgAtK: 0.2, mrrAtK: 0.1, weightedGainAtK: 1.2 },
+            candidate: { requests: 10, ndcgAtK: 0.3, mrrAtK: 0.2, weightedGainAtK: 1.8 },
+            delta: { requests: 10, ndcgAtK: 0.1, mrrAtK: 0.1, weightedGainAtK: 0.6 },
+            coverage: { sessionsEvaluated: 10 },
+            slices: [],
+          };
+        },
+        getActiveConfigFn: async () => ({
+          config: {
+            version: "hybrid_v1",
+            regularWeights: {
+              followAff: 1.8,
+              authorAff: 1.2,
+              styleMatch: 1.0,
+              colorMatch: 0.6,
+              brandMatch: 0.6,
+              engagementVelocity: 0.9,
+              freshness: 0.8,
+            },
+            marketWeights: {
+              followAff: 1.6,
+              authorAff: 1.0,
+              categoryMatch: 1.0,
+              brandMatch: 0.8,
+              sizeMatch: 0.9,
+              priceBandMatch: 0.8,
+              conditionMatch: 0.7,
+              engagementVelocity: 0.8,
+              freshness: 0.7,
+            },
+            freshnessHalfLifeDays: { regular: 7, market: 14 },
+            blend: {
+              defaultMarketShare: 0.4,
+              minMarketShare: 0.2,
+              maxMarketShare: 0.8,
+              minActionsForLearnedShare: 10,
+            },
+            diversityCaps: [
+              { maxRankExclusive: 20, maxPerAuthor: 2 },
+              { maxRankExclusive: 30, maxPerAuthor: 3 },
+            ],
+            pools: {
+              defaultLimitPerType: 250,
+              regularRecencyDays: 180,
+              marketRecencyDays: 365,
+              engagementWindowDays: 30,
+              preferenceWindowDays: 90,
+            },
+            actionSignalWeights: {
+              user_follow: 3,
+              post_patch_save: 3,
+              post_like: 2,
+              comment_create: 2,
+              comment_like: 1,
+              user_unfollow: -3,
+              post_unlike: -2,
+              comment_unlike: -1,
+              feed_click: 0.5,
+              feed_dwell: 0.25,
+            },
+          },
+        }),
+        createSimulationRunFn: async () => ({ id: "run-synthetic" }),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/simulate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "synthetic",
+        seed: "demo-seed",
+        sessions: 120,
+        users: 20,
+        type: "all",
+        k: 15,
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.equal(payload.simulation.mode, "synthetic");
+    assert.equal(payload.runId, "run-synthetic");
+    assert.equal(captured.mode, "synthetic");
+    assert.equal(captured.params.seed, "demo-seed");
+  });
+});
+
+test("admin config apply endpoint enforces confirmation", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/config/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "nope" }),
+    });
+    assert.equal(res.status, 400);
+    const payload = await res.json();
+    assert.match(payload.message, /confirm must be APPLY/i);
+  });
+});
+
+test("admin config rollback endpoint enforces confirmation", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/config/rollback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "nope" }),
+    });
+    assert.equal(res.status, 400);
+    const payload = await res.json();
+    assert.match(payload.message, /confirm must be ROLLBACK/i);
+  });
+});

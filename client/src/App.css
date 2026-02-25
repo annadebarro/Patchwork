@@ -4687,6 +4687,49 @@ button:disabled {
   background: var(--denim-dark);
 }
 
+/* Typing indicator */
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 8px 14px;
+  background: var(--cream);
+  border-radius: 12px;
+  margin-bottom: 4px;
+  color: var(--denim-mid);
+}
+
+.typing-needle {
+  display: block;
+  overflow: visible;
+}
+
+.sewing-needle {
+  offset-path: path("M -10 8 C 0 4, 14 4, 20 16 C 26 28, 34 28, 40 16 C 46 4, 54 4, 60 16 C 66 28, 74 28, 86 28");
+  offset-rotate: auto;
+  animation: needle-travel 2.4s ease-in-out infinite;
+}
+
+@keyframes needle-travel {
+  0%      { offset-distance: 0%; }
+  80%     { offset-distance: 100%; }
+  80.001% { offset-distance: 0%; }
+  100%    { offset-distance: 0%; }
+}
+
+.thread-trail {
+  stroke-dasharray: 130;
+  stroke-dashoffset: 130;
+  animation: thread-grow 2.4s ease-in-out infinite;
+}
+
+@keyframes thread-grow {
+  0%      { stroke-dashoffset: 130; }
+  80%     { stroke-dashoffset: 0; }
+  80.001% { stroke-dashoffset: 130; }
+  100%    { stroke-dashoffset: 130; }
+}
+
 .chat-empty {
   flex: 1;
   display: flex;
