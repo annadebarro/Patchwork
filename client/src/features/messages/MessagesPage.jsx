@@ -27,11 +27,13 @@ function MessagesPage({ currentUser }) {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingTarget, setRatingTarget] = useState(null);
   const [ratingConvoId, setRatingConvoId] = useState(null);
+  const [peerIsTyping, setPeerIsTyping] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const conversationsRef = useRef([]);
   const activeConvoIdRef = useRef(null);
   const showRatingAfterLoadRef = useRef(false);
+  const typingTimeoutRef = useRef(null);
   const SEARCH_USERS_LIMIT = 20;
 
   // Keep refs in sync so socket handlers and effects always see fresh values
@@ -96,14 +98,16 @@ function MessagesPage({ currentUser }) {
     }
   }, [conversations, searchParams, setSearchParams, location.state, location.pathname, navigate]);
 
-  // Socket.IO connection
+  // Socket.IO connection — created once per user session, not per conversation
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token || !currentUser?.id) return;
 
     let socket;
+    let cancelled = false;
     async function connectSocket() {
       const { io } = await import("socket.io-client");
+      if (cancelled) return; // effect cleaned up before import finished — don't create orphan socket
       const socketUrl = API_BASE_URL.replace("/api", "");
       socket = io(socketUrl || window.location.origin, {
         auth: { token },
@@ -111,7 +115,8 @@ function MessagesPage({ currentUser }) {
       socketRef.current = socket;
 
       socket.on("new_message", ({ message, conversationId }) => {
-        if (conversationId === activeConvoId) {
+        // Use ref so this handler always sees the current conversation
+        if (conversationId === activeConvoIdRef.current) {
           setMessages((prev) => [...prev, message]);
         }
         setConversations((prev) => {
@@ -125,6 +130,18 @@ function MessagesPage({ currentUser }) {
         });
       });
 
+      socket.on("peer_typing", ({ conversationId }) => {
+        if (conversationId === activeConvoIdRef.current) {
+          setPeerIsTyping(true);
+        }
+      });
+
+      socket.on("peer_stopped_typing", ({ conversationId }) => {
+        if (conversationId === activeConvoIdRef.current) {
+          setPeerIsTyping(false);
+        }
+      });
+
       socket.on("conversation_updated", ({ conversation }) => {
         setConversations((prev) => {
           if (prev.find((c) => c.id === conversation.id)) return prev;
@@ -133,20 +150,16 @@ function MessagesPage({ currentUser }) {
       });
 
       socket.on("deal_completed", ({ conversationId }) => {
-        // Update conversations list
         setConversations((prev) =>
           prev.map((c) =>
             c.id === conversationId ? { ...c, dealStatus: "completed" } : c
           )
         );
-        // Update convoDetail if currently viewing this conversation
         setConvoDetail((prev) => {
           if (!prev || prev.id !== conversationId) return prev;
           return { ...prev, dealStatus: "completed" };
         });
 
-        // Show the rating modal — use ref for freshest participant data
-        // Small timeout lets state updates above settle first
         setTimeout(() => {
           const convo = conversationsRef.current.find((c) => c.id === conversationId);
           const participants = convo?.participants || [];
@@ -163,9 +176,18 @@ function MessagesPage({ currentUser }) {
     connectSocket();
 
     return () => {
-      if (socket) socket.disconnect();
+      cancelled = true;
+      if (socket) {
+        socket.disconnect();
+        socketRef.current = null;
+      }
     };
-  }, [activeConvoId, currentUser?.id]);
+  }, [currentUser?.id]);
+
+  // Clear typing indicator when switching conversations
+  useEffect(() => {
+    setPeerIsTyping(false);
+  }, [activeConvoId]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -226,6 +248,10 @@ function MessagesPage({ currentUser }) {
     const token = localStorage.getItem("token");
     if (!token) return;
 
+    // Stop typing indicator when message is sent
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    socketRef.current?.emit("stop_typing", { conversationId: activeConvoId });
+
     setSending(true);
     try {
       const res = await fetch(`${API_BASE_URL}/messages/conversations/${activeConvoId}/messages`, {
@@ -255,6 +281,17 @@ function MessagesPage({ currentUser }) {
     } finally {
       setSending(false);
     }
+  }
+
+  function handleMsgBodyChange(e) {
+    setMsgBody(e.target.value);
+    const socket = socketRef.current;
+    if (!socket || !activeConvoId) return;
+    socket.emit("typing", { conversationId: activeConvoId });
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("stop_typing", { conversationId: activeConvoId });
+    }, 2000);
   }
 
   const searchUsers = useCallback(async (query) => {
@@ -598,13 +635,41 @@ function MessagesPage({ currentUser }) {
                     );
                   })
                 )}
+                {peerIsTyping && (
+                  <div className="typing-indicator">
+                    {/* Needle follows a CSS motion path (S-curve) through 3 holes.
+                        Split-arc layering creates the 3D threading illusion:
+                        dot1 & dot3: needle goes top→bottom (bottom arc behind, top arc in front)
+                        dot2: needle goes bottom→top (top arc behind, bottom arc in front) */}
+                    <svg className="typing-needle" width="80" height="32" viewBox="0 0 80 32" fill="none" overflow="visible">
+                      {/* Thread trail — same S-curve as the motion path, revealed as needle advances */}
+                      <path className="thread-trail"
+                        d="M -10 8 C 0 4, 14 4, 20 16 C 26 28, 34 28, 40 16 C 46 4, 54 4, 60 16 C 66 28, 74 28, 86 28"
+                        stroke="currentColor" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.6"/>
+                      {/* Behind-needle arcs: dot1 bottom, dot2 top, dot3 bottom */}
+                      <path d="M 15 16 A 5 5 0 0 1 25 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                      <path d="M 35 16 A 5 5 0 0 0 45 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                      <path d="M 55 16 A 5 5 0 0 1 65 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                      {/* Needle — follows the S-curve via CSS offset-path, rotates automatically */}
+                      <g className="sewing-needle">
+                        <rect x="-7" y="-1.5" width="14" height="3" rx="1.5" fill="currentColor"/>
+                        <path d="M7 -1.5 L11 0 L7 1.5Z" fill="currentColor"/>
+                        <ellipse cx="-4.5" cy="0" rx="0.9" ry="1.4" fill="var(--cream)"/>
+                      </g>
+                      {/* In-front-of-needle arcs: dot1 top, dot2 bottom, dot3 top */}
+                      <path d="M 15 16 A 5 5 0 0 0 25 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                      <path d="M 35 16 A 5 5 0 0 1 45 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                      <path d="M 55 16 A 5 5 0 0 0 65 16" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                    </svg>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
               <form className="chat-input" onSubmit={sendMessage}>
                 <input
                   type="text"
                   value={msgBody}
-                  onChange={(e) => setMsgBody(e.target.value)}
+                  onChange={handleMsgBodyChange}
                   placeholder="Type a message..."
                   maxLength={2000}
                 />
