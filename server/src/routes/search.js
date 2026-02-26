@@ -63,6 +63,56 @@ function scoreTextField(value, query, tokens, weights) {
   return score;
 }
 
+function scoreTextList(values, query, tokens, weights) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+
+  let best = 0;
+  for (const value of values) {
+    const score = scoreTextField(value, query, tokens, weights);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
+function tokenMatchesValue(value, token) {
+  const text = normalizeText(value);
+  if (!text || !token) return false;
+  return text.includes(token);
+}
+
+function postMatchesAllTokens(post, tokens) {
+  if (!Array.isArray(tokens) || tokens.length <= 1) return true;
+
+  const fields = [
+    post.caption,
+    post.author?.username,
+    post.author?.name,
+    post.brand,
+    post.category,
+    post.subcategory,
+    post.condition,
+    post.sizeLabel,
+  ];
+
+  const styleTags = Array.isArray(post.styleTags) ? post.styleTags : [];
+  const colorTags = Array.isArray(post.colorTags) ? post.colorTags : [];
+
+  for (const token of tokens) {
+    const matchesField = fields.some((value) => tokenMatchesValue(value, token));
+    if (matchesField) continue;
+
+    const matchesStyleTag = styleTags.some((tag) => tokenMatchesValue(tag, token));
+    if (matchesStyleTag) continue;
+
+    const matchesColorTag = colorTags.some((tag) => tokenMatchesValue(tag, token));
+    if (matchesColorTag) continue;
+
+    return false;
+  }
+
+  return true;
+}
+
 function compareRankedItems(a, b) {
   if (b.score !== a.score) return b.score - a.score;
   const aCreated = new Date(a.createdAt).getTime();
@@ -148,6 +198,55 @@ function scorePost(post, query, tokens) {
       contains: 45,
       tokenPrefix: 14,
       tokenContains: 6,
+    }) +
+    scoreTextField(post.brand, query, tokens, {
+      exact: 150,
+      prefix: 118,
+      contains: 82,
+      tokenPrefix: 30,
+      tokenContains: 14,
+    }) +
+    scoreTextField(post.category, query, tokens, {
+      exact: 132,
+      prefix: 102,
+      contains: 70,
+      tokenPrefix: 26,
+      tokenContains: 12,
+    }) +
+    scoreTextField(post.subcategory, query, tokens, {
+      exact: 126,
+      prefix: 98,
+      contains: 66,
+      tokenPrefix: 24,
+      tokenContains: 11,
+    }) +
+    scoreTextField(post.condition, query, tokens, {
+      exact: 120,
+      prefix: 92,
+      contains: 62,
+      tokenPrefix: 22,
+      tokenContains: 10,
+    }) +
+    scoreTextField(post.sizeLabel, query, tokens, {
+      exact: 124,
+      prefix: 96,
+      contains: 64,
+      tokenPrefix: 23,
+      tokenContains: 10,
+    }) +
+    scoreTextList(post.styleTags, query, tokens, {
+      exact: 140,
+      prefix: 110,
+      contains: 72,
+      tokenPrefix: 28,
+      tokenContains: 12,
+    }) +
+    scoreTextList(post.colorTags, query, tokens, {
+      exact: 138,
+      prefix: 108,
+      contains: 70,
+      tokenPrefix: 26,
+      tokenContains: 12,
     })
   );
 }
@@ -293,7 +392,7 @@ async function fetchPosts({ query, tokens, offset, limit, viewerId, type }) {
         score: scorePost(post, query, tokens),
       };
     })
-    .filter((post) => post.score > 0)
+    .filter((post) => post.score > 0 && postMatchesAllTokens(post, tokens))
     .sort(compareRankedItems);
 
   const total = ranked.length;
