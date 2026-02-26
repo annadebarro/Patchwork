@@ -16,6 +16,7 @@ const DEFAULT_SEARCH_LIMIT = 24;
 const MAX_LIMIT = 60;
 const MAX_QUERY_LENGTH = 80;
 const MIN_QUERY_LENGTH = 2;
+const MAX_QUERY_TOKENS = 8;
 const MAX_ANALYTICS_EVENTS = 100;
 
 const MARKETPLACE_ANALYTICS_ACTIONS = new Set([
@@ -39,10 +40,174 @@ function normalizeQuery(rawQuery) {
   return rawQuery.trim().replace(/\s+/g, " ").slice(0, MAX_QUERY_LENGTH);
 }
 
+function tokenizeQuery(query) {
+  if (!query) return [];
+  return [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))].slice(0, MAX_QUERY_TOKENS);
+}
+
 function normalizeToken(rawValue) {
   if (typeof rawValue !== "string") return null;
   const normalized = rawValue.trim().toLowerCase();
   return normalized || null;
+}
+
+function normalizeText(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().toLowerCase();
+}
+
+function tokenMatchesValue(value, token) {
+  const normalized = normalizeText(value);
+  if (!normalized || !token) return false;
+  return normalized.includes(token);
+}
+
+function scoreTextField(value, query, tokens, weights) {
+  const text = normalizeText(value);
+  if (!text) return 0;
+
+  let score = 0;
+  if (text === query) score += weights.exact;
+  if (text.startsWith(query)) score += weights.prefix;
+  if (text.includes(query)) score += weights.contains;
+
+  for (const token of tokens) {
+    if (!token || token === query) continue;
+    if (text === token) score += Math.round(weights.exact * 0.55);
+    else if (text.startsWith(token)) score += weights.tokenPrefix;
+    else if (text.includes(token)) score += weights.tokenContains;
+  }
+
+  return score;
+}
+
+function scoreTextList(values, query, tokens, weights) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+
+  let best = 0;
+  for (const value of values) {
+    const score = scoreTextField(value, query, tokens, weights);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
+function postMatchesToken(post, token) {
+  if (!post || !token) return false;
+
+  const searchableFields = [
+    post.caption,
+    post.brand,
+    post.category,
+    post.subcategory,
+    post.condition,
+    post.sizeLabel,
+    post.author?.username,
+    post.author?.name,
+  ];
+
+  if (searchableFields.some((value) => tokenMatchesValue(value, token))) {
+    return true;
+  }
+
+  const styleTags = Array.isArray(post.styleTags) ? post.styleTags : [];
+  if (styleTags.some((tag) => tokenMatchesValue(tag, token))) {
+    return true;
+  }
+
+  const colorTags = Array.isArray(post.colorTags) ? post.colorTags : [];
+  if (colorTags.some((tag) => tokenMatchesValue(tag, token))) {
+    return true;
+  }
+
+  return false;
+}
+
+function postMatchesAllTokens(post, tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) return true;
+  return tokens.every((token) => postMatchesToken(post, token));
+}
+
+function scoreMarketplaceSearchPost(post, query, tokens) {
+  return (
+    scoreTextField(post.caption, query, tokens, {
+      exact: 92,
+      prefix: 66,
+      contains: 46,
+      tokenPrefix: 14,
+      tokenContains: 8,
+    }) +
+    scoreTextField(post.brand, query, tokens, {
+      exact: 138,
+      prefix: 104,
+      contains: 74,
+      tokenPrefix: 28,
+      tokenContains: 14,
+    }) +
+    scoreTextField(post.category, query, tokens, {
+      exact: 126,
+      prefix: 96,
+      contains: 66,
+      tokenPrefix: 24,
+      tokenContains: 12,
+    }) +
+    scoreTextField(post.subcategory, query, tokens, {
+      exact: 122,
+      prefix: 94,
+      contains: 64,
+      tokenPrefix: 22,
+      tokenContains: 11,
+    }) +
+    scoreTextField(post.condition, query, tokens, {
+      exact: 118,
+      prefix: 90,
+      contains: 60,
+      tokenPrefix: 20,
+      tokenContains: 10,
+    }) +
+    scoreTextField(post.sizeLabel, query, tokens, {
+      exact: 120,
+      prefix: 92,
+      contains: 62,
+      tokenPrefix: 20,
+      tokenContains: 10,
+    }) +
+    scoreTextField(post.author?.username, query, tokens, {
+      exact: 106,
+      prefix: 78,
+      contains: 56,
+      tokenPrefix: 18,
+      tokenContains: 9,
+    }) +
+    scoreTextField(post.author?.name, query, tokens, {
+      exact: 84,
+      prefix: 60,
+      contains: 44,
+      tokenPrefix: 14,
+      tokenContains: 7,
+    }) +
+    scoreTextList(post.styleTags, query, tokens, {
+      exact: 132,
+      prefix: 100,
+      contains: 68,
+      tokenPrefix: 24,
+      tokenContains: 11,
+    }) +
+    scoreTextList(post.colorTags, query, tokens, {
+      exact: 140,
+      prefix: 108,
+      contains: 72,
+      tokenPrefix: 28,
+      tokenContains: 13,
+    })
+  );
+}
+
+function compareRankedPosts(a, b) {
+  if (b.score !== a.score) return b.score - a.score;
+  const aCreated = new Date(a.post?.createdAt).getTime();
+  const bCreated = new Date(b.post?.createdAt).getTime();
+  return bCreated - aCreated;
 }
 
 function normalizePriceCents(rawValue) {
@@ -260,6 +425,8 @@ router.get("/search", optionalAuthMiddleware, async (req, res) => {
   const limit = clamp(toInt(req.query.limit, DEFAULT_SEARCH_LIMIT), 1, MAX_LIMIT);
   const offset = clamp(toInt(req.query.offset, 0), 0, 10000);
   const query = normalizeQuery(req.query.q);
+  const normalizedQuery = query.toLowerCase();
+  const queryTokens = tokenizeQuery(normalizedQuery);
   const category = normalizeToken(req.query.category);
   const condition = normalizeToken(req.query.condition);
   const minPriceCents = normalizePriceCents(req.query.minPrice);
@@ -302,43 +469,63 @@ router.get("/search", optionalAuthMiddleware, async (req, res) => {
       if (maxPriceCents !== null) where.priceCents[Op.lte] = maxPriceCents;
     }
 
+    let visibleRows;
+    let hasMore;
+
     if (hasValidSearchQuery) {
-      const pattern = `%${query.toLowerCase()}%`;
-      where[Op.or] = [
-        { caption: { [Op.iLike]: pattern } },
-        { brand: { [Op.iLike]: pattern } },
-        { category: { [Op.iLike]: pattern } },
-        { subcategory: { [Op.iLike]: pattern } },
-        { "$author.username$": { [Op.iLike]: pattern } },
-        { "$author.name$": { [Op.iLike]: pattern } },
-      ];
+      const rows = await Post.findAll({
+        where,
+        include: [
+          {
+            model: User,
+            as: "author",
+            attributes: ["id", "username", "name", "profilePicture"],
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        subQuery: false,
+      });
+
+      const ranked = rows
+        .map((row) => row.toJSON())
+        .map((post) => ({
+          post,
+          score: scoreMarketplaceSearchPost(post, normalizedQuery, queryTokens),
+        }))
+        .filter((entry) => entry.score > 0 && postMatchesAllTokens(entry.post, queryTokens))
+        .sort(compareRankedPosts);
+
+      const endIndex = offset + limit;
+      visibleRows = ranked.slice(offset, endIndex).map((entry) => entry.post);
+      hasMore = ranked.length > endIndex;
+    } else {
+      const rows = await Post.findAll({
+        where,
+        include: [
+          {
+            model: User,
+            as: "author",
+            attributes: ["id", "username", "name", "profilePicture"],
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: limit + 1,
+        offset,
+        subQuery: false,
+      });
+
+      hasMore = rows.length > limit;
+      visibleRows = rows.slice(0, limit).map((row) => row.toJSON());
     }
 
-    const rows = await Post.findAll({
-      where,
-      include: [
-        {
-          model: User,
-          as: "author",
-          attributes: ["id", "username", "name", "profilePicture"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-      limit: limit + 1,
-      offset,
-      subQuery: false,
-    });
-
-    const hasMore = rows.length > limit;
-    const visibleRows = rows.slice(0, limit);
     const likeCountMap = await buildLikeCountMap({
       Like,
-      postIds: visibleRows.map((row) => row.id),
+      postIds: visibleRows.map((post) => post.id),
     });
 
     return res.json({
       query,
-      items: visibleRows.map((row) => toListing(row.toJSON(), likeCountMap)),
+      items: visibleRows.map((post) => toListing(post, likeCountMap)),
       pagination: buildPagination({
         limit,
         offset,

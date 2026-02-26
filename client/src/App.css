@@ -1494,24 +1494,27 @@ button:disabled {
   background: var(--denim-wash);
 }
 
+.marketplace-carousel-arrow:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: var(--paper);
+}
+
 .marketplace-carousel-arrow svg {
   width: 16px;
   height: 16px;
 }
 
 .marketplace-carousel-track {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(var(--marketplace-cards-per-page, 4), minmax(0, 1fr));
   gap: 12px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
+  overflow: hidden;
   padding: 2px;
-  scrollbar-width: thin;
 }
 
 .marketplace-carousel-slide {
-  flex: 0 0 260px;
-  max-width: 260px;
-  scroll-snap-align: start;
+  min-width: 0;
 }
 
 .marketplace-card {
@@ -3995,10 +3998,6 @@ button:disabled {
     justify-self: start;
   }
 
-  .marketplace-carousel-slide {
-    flex-basis: 230px;
-    max-width: 230px;
-  }
 }
 
 @media (max-width: 600px) {
@@ -4052,11 +4051,6 @@ button:disabled {
 
   .marketplace-filter-row {
     grid-template-columns: 1fr;
-  }
-
-  .marketplace-carousel-slide {
-    flex-basis: 78vw;
-    max-width: 78vw;
   }
 
   .marketplace-results-grid {
