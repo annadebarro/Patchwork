@@ -106,7 +106,7 @@ function serializeUser(user) {
     name: user.name,
     role: user.role || "user",
     bio: typeof user.bio === "string" ? user.bio : "",
-    avatarUrl: typeof user.avatarUrl === "string" ? user.avatarUrl : "",
+    avatarUrl: user.profilePicture || "",
     sizePreferences: normalizeStoredSizePreferences(user.sizePreferences),
     favoriteBrands,
     profilePicture: user.profilePicture || null,
@@ -417,7 +417,6 @@ router.get("/me", authMiddleware, async (req, res) => {
         "name",
         "role",
         "bio",
-        "avatarUrl",
         "sizePreferences",
         "favoriteBrands",
         "profilePicture",
@@ -490,7 +489,7 @@ router.patch("/me", authMiddleware, async (req, res) => {
 
     if (validatedName.value !== undefined) user.name = validatedName.value;
     if (validatedBio.value !== undefined) user.bio = validatedBio.value;
-    if (validatedAvatarUrl.value !== undefined) user.avatarUrl = validatedAvatarUrl.value;
+    if (validatedAvatarUrl.value !== undefined) user.profilePicture = validatedAvatarUrl.value;
     if (validatedSizePreferences.value !== undefined) {
       user.sizePreferences = validatedSizePreferences.value;
     }

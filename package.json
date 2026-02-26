@@ -7,5 +7,7 @@
     "db:migrate:status": "npm run db:migrate:status --prefix server",
     "setup": "npm install --prefix server && npm install --prefix client"
   },
-  "dependencies": {}
+  "dependencies": {
+    "recharts": "^3.7.0"
+  }
 }
