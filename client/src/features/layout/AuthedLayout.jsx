@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import { buildMarketplaceAnalyticsEvent, trackMarketplaceEvent } from "../../shared/analytics/marketplaceAnalytics";
 import PatchLogo from "../../shared/ui/PatchLogo";
 import ProfilePatch from "../../shared/ui/ProfilePatch";
 
-function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
+function AuthedLayout({ user, onLogout, onOpenCreatePost, children = null }) {
+  const location = useLocation();
   const navigate = useNavigate();
   const [notifPanelOpen, setNotifPanelOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [relativeNowMs, setRelativeNowMs] = useState(() => new Date().getTime());
   const pollRef = useRef(null);
+  const isMarketplaceActive = location.pathname.startsWith("/marketplace");
 
   const fetchNotifications = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -98,6 +101,21 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
     return `${days}d`;
   }
 
+  function handleMarketplaceTabClick() {
+    void trackMarketplaceEvent(
+      buildMarketplaceAnalyticsEvent({
+        actionType: "marketplace_tab_click",
+        targetId: "sidebar_marketplace_tab",
+        section: "sidebar",
+        metadata: {
+          source: "left_nav",
+        },
+      })
+    );
+
+    navigate("/marketplace");
+  }
+
   return (
     <div className="app-layout">
       {/* Left Sidebar */}
@@ -142,6 +160,17 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>
           </NavLink>
+          <button
+            type="button"
+            className={`sidebar-icon ${isMarketplaceActive ? "active" : ""}`}
+            title="Marketplace"
+            onClick={handleMarketplaceTabClick}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 7h12l-1 13H7L6 7z" />
+              <path d="M9 7V6a3 3 0 0 1 6 0v1" />
+            </svg>
+          </button>
           {user?.role === "admin" && (
             <NavLink
               to="/admin/recommendations"
@@ -248,7 +277,7 @@ function AuthedLayout({ user, onLogout, onOpenCreatePost }) {
 
       {/* Main Content */}
       <div className="main-content">
-        <Outlet />
+        {children || <Outlet />}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ const SOURCE_SURFACES = Object.freeze({
   POST_DETAIL: "post_detail",
   PROFILE: "profile",
   SEARCH_RESULTS: "search_results",
+  MARKETPLACE: "marketplace",
   UNKNOWN: "unknown",
 });
 const ALLOWED_SURFACES = new Set(Object.values(SOURCE_SURFACES));

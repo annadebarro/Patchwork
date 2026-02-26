@@ -12,6 +12,7 @@ import HomeLayout from "./features/feed/HomeLayout";
 import SearchPage from "./features/search/SearchPage";
 import PostDetailPage from "./features/post-detail/PostDetailPage";
 import MessagesPage from "./features/messages/MessagesPage";
+import MarketplacePage from "./features/marketplace/MarketplacePage";
 import UserPage from "./features/profile/UserPage";
 import AccountSettings from "./features/settings/AccountSettings";
 import CreatePostModal from "./features/feed/CreatePostModal";
@@ -268,9 +269,11 @@ function App() {
     Boolean(user) &&
     showOnboardingPrompt &&
     !location.pathname.startsWith("/onboarding");
+  const hasPublicMarketplaceView = location.pathname.startsWith("/marketplace") || location.pathname.startsWith("/post/");
+  const shellClassName = user || hasPublicMarketplaceView ? "shell--home" : "shell--auth";
 
   return (
-    <main className={`shell ${user ? "shell--home" : "shell--auth"}`}>
+    <main className={`shell ${shellClassName}`}>
       <Routes>
         <Route
           path="/"
@@ -302,6 +305,38 @@ function App() {
           }
         />
         <Route
+          path="/marketplace"
+          element={
+            user ? (
+              <AuthedLayout
+                user={user}
+                onLogout={handleLogout}
+                onOpenCreatePost={() => setCreatePostOpen(true)}
+              >
+                <MarketplacePage />
+              </AuthedLayout>
+            ) : (
+              <MarketplacePage />
+            )
+          }
+        />
+        <Route
+          path="/post/:postId"
+          element={
+            user ? (
+              <AuthedLayout
+                user={user}
+                onLogout={handleLogout}
+                onOpenCreatePost={() => setCreatePostOpen(true)}
+              >
+                <PostDetailPage currentUser={user} />
+              </AuthedLayout>
+            ) : (
+              <PostDetailPage currentUser={null} />
+            )
+          }
+        />
+        <Route
           element={
             <RequireAuth user={user}>
               <AuthedLayout
@@ -314,7 +349,6 @@ function App() {
         >
           <Route path="/home" element={<HomeLayout refreshKey={postRefreshKey} />} />
           <Route path="/search" element={<SearchPage />} />
-          <Route path="/post/:postId" element={<PostDetailPage currentUser={user} />} />
           <Route path="/messages" element={<MessagesPage currentUser={user} />} />
           <Route path="/userpage/:username" element={<UserPage currentUser={user} />} />
           <Route
