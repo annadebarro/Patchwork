@@ -116,6 +116,29 @@ function serializeUser(user) {
   };
 }
 
+function validateAvatarUrl(avatarUrl) {
+  if (avatarUrl === undefined) return { value: undefined };
+  if (avatarUrl === null || avatarUrl === "") return { value: null };
+  if (typeof avatarUrl !== "string") {
+    return { error: "Avatar URL must be a string." };
+  }
+
+  const trimmed = avatarUrl.trim();
+  if (!trimmed) return { value: null };
+
+  const isDataUrl = trimmed.startsWith("data:image/");
+  const isHttpUrl = /^https?:\/\//i.test(trimmed);
+  if (!isDataUrl && !isHttpUrl) {
+    return { error: "Avatar URL must be a valid image data URL or http(s) URL." };
+  }
+
+  if (trimmed.length > 2_000_000) {
+    return { error: "Avatar image is too large." };
+  }
+
+  return { value: trimmed };
+}
+
 function validateName(name) {
   if (name === undefined) return { value: undefined };
   if (typeof name !== "string") {
