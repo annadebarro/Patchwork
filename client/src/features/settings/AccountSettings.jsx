@@ -59,7 +59,10 @@ function AccountSettings({ user, onUpdateUser }) {
   function handleFileChange(event) {
     const file = event.target.files[0];
     if (file) {
-      setRawPreviewUrl(URL.createObjectURL(file));
+      const objectUrl = URL.createObjectURL(file);
+      setAvatarFile(file);
+      setPreviewUrl(objectUrl);
+      setRawPreviewUrl(objectUrl);
       setShowCropper(true);
     }
     event.target.value = "";
@@ -75,6 +78,7 @@ function AccountSettings({ user, onUpdateUser }) {
   function handleChangeImage() {
     setShowCropper(false);
     setRawPreviewUrl(null);
+    setAvatarFile(null);
     fileInputRef.current?.click();
   }
 

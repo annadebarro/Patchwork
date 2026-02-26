@@ -15,6 +15,10 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
   const [editDesc, setEditDesc] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+  const [previewSaving, setPreviewSaving] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [pendingPreview, setPendingPreview] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -32,7 +36,7 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
           setPatches(
             (data.quilt?.patches || []).map((p) => ({
               postId: p.post?.id || p.postId,
-              imageUrl: p.post?.imageUrl,
+              imageUrl: p.post?.imageUrl || p.post?.imageUrls?.[0],
             })).filter((p) => p.imageUrl)
           );
         }
@@ -45,6 +49,12 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
     fetchQuilt();
     return () => { isMounted = false; };
   }, [quiltId]);
+
+  useEffect(() => {
+    if (showPreviewPicker) {
+      setPendingPreview(quilt?.previewImageUrl || null);
+    }
+  }, [showPreviewPicker, quilt]);
 
   async function removePatch(postId) {
     const token = localStorage.getItem("token");
@@ -109,6 +119,34 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
       }
     } catch {
       // silent
+    }
+  }
+
+  async function updatePreviewImage(previewImageUrl) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setPreviewSaving(true);
+    setPreviewError("");
+    try {
+      const res = await fetch(`${API_BASE_URL}/quilts/${quiltId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ previewImageUrl }),
+      });
+      const data = await parseApiResponse(res);
+      if (!res.ok) {
+        setPreviewError(data?.message || "Failed to update preview image.");
+        return;
+      }
+      setQuilt(data.quilt);
+      setShowPreviewPicker(false);
+    } catch {
+      setPreviewError("Failed to update preview image.");
+    } finally {
+      setPreviewSaving(false);
     }
   }
 
@@ -239,11 +277,28 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
             ) : null
           )}
 
-          {isOwner && (
-            <div className="quilt-danger-zone">
-              {deleteConfirm ? (
-                <div className="quilt-delete-confirm">
-                  <span>Delete this quilt?</span>
+            {isOwner && (
+              <div className="quilt-danger-zone">
+                <button
+                  type="button"
+                  className="save-button save-button--sm"
+                  onClick={() => {
+                    setEditName(quilt.name);
+                    setEditingName(true);
+                    if (quilt.description) {
+                      setEditDesc(quilt.description);
+                      setEditingDesc(true);
+                    } else {
+                      setEditingDesc(true);
+                    }
+                    setShowPreviewPicker(true);
+                  }}
+                >
+                  Edit quilt
+                </button>
+                {deleteConfirm ? (
+                  <div className="quilt-delete-confirm">
+                    <span>Delete this quilt?</span>
                   <button type="button" className="cancel-button cancel-button--sm" onClick={deleteQuilt}>
                     Yes, delete
                   </button>
@@ -271,6 +326,63 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
         removingId={removingId}
         onClickPatch={(postId) => navigate(`/post/${postId}`)}
       />
+
+      {showPreviewPicker && (
+        <div className="quilt-preview-backdrop" role="dialog" aria-modal="true">
+          <div className="quilt-preview-modal">
+            <div className="quilt-preview-header">
+              <h3>Choose preview image</h3>
+              <button
+                type="button"
+                className="cancel-button cancel-button--sm"
+                onClick={() => setShowPreviewPicker(false)}
+              >
+                Close
+              </button>
+            </div>
+            {previewError && <p className="quilt-preview-error">{previewError}</p>}
+            {patches.length === 0 ? (
+              <p className="quilt-preview-empty">No patches to choose from yet.</p>
+            ) : (
+              <div className="quilt-preview-grid">
+                {patches.map((patch) => (
+                  <button
+                    key={patch.postId}
+                    type="button"
+                    className={`quilt-preview-tile${pendingPreview === patch.imageUrl ? " quilt-preview-tile--selected" : ""}`}
+                    onClick={() => setPendingPreview(patch.imageUrl)}
+                    disabled={previewSaving}
+                    title="Use this image"
+                  >
+                    <img src={patch.imageUrl} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="quilt-preview-actions">
+              <button
+                type="button"
+                className="save-button save-button--sm"
+                onClick={() => updatePreviewImage(pendingPreview)}
+                disabled={previewSaving || !pendingPreview}
+              >
+                Save preview
+              </button>
+              <button
+                type="button"
+                className="cancel-button cancel-button--sm"
+                onClick={() => {
+                  setPendingPreview(null);
+                  updatePreviewImage(null);
+                }}
+                disabled={previewSaving}
+              >
+                Clear preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

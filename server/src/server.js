@@ -6,7 +6,7 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const { connectToDatabase } = require("./config/db");
 const { assertNoPendingMigrations } = require("./config/migrationGuard");
-const { initModels } = require("./models");
+const { initModels, getModels } = require("./models");
 const { registerRoutes } = require("./routes");
 
 const PORT = process.env.PORT || 5000;
@@ -46,7 +46,7 @@ const corsOptions = isProduction
     };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 if (DEBUG_REQUESTS) {
   app.use((req, res, next) => {
@@ -81,9 +81,19 @@ let server;
 
 async function bootstrap() {
   try {
+    const t0 = Date.now();
+    console.log("[boot] Connecting to database...");
     const sequelize = await connectToDatabase(process.env.DATABASE_URL);
+    console.log(`[boot] DB connected in ${Date.now() - t0}ms`);
+
     initModels(sequelize);
-    await assertNoPendingMigrations(sequelize);
+
+    if (process.env.SKIP_MIGRATION_CHECK !== "true") {
+      const t1 = Date.now();
+      console.log("[boot] Checking migrations...");
+      await assertNoPendingMigrations(sequelize);
+      console.log(`[boot] Migration check done in ${Date.now() - t1}ms`);
+    }
 
     const httpServer = http.createServer(app);
     const io = new Server(httpServer, { cors: corsOptions });
@@ -106,6 +116,38 @@ async function bootstrap() {
     io.on("connection", (socket) => {
       // Join the user to their own room
       socket.join(socket.userId);
+
+      // Relay typing indicators to other participants
+      socket.on("typing", async ({ conversationId }) => {
+        if (!conversationId) return;
+        try {
+          const { ConversationParticipant } = getModels();
+          const participants = await ConversationParticipant.findAll({
+            where: { conversationId, leftAt: null },
+          });
+          participants.forEach((p) => {
+            if (String(p.userId) !== String(socket.userId)) {
+              io.to(p.userId).emit("peer_typing", { conversationId });
+            }
+          });
+        } catch {}
+      });
+
+      socket.on("stop_typing", async ({ conversationId }) => {
+        if (!conversationId) return;
+        try {
+          const { ConversationParticipant } = getModels();
+          const participants = await ConversationParticipant.findAll({
+            where: { conversationId, leftAt: null },
+          });
+          participants.forEach((p) => {
+            if (String(p.userId) !== String(socket.userId)) {
+              io.to(p.userId).emit("peer_stopped_typing", { conversationId });
+            }
+          });
+        } catch {}
+      });
+
       socket.on("disconnect", () => {});
     });
 

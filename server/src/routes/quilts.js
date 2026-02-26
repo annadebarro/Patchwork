@@ -114,7 +114,7 @@ router.get("/:quiltId", optionalAuthMiddleware, async (req, res) => {
 router.patch("/:quiltId", authMiddleware, async (req, res) => {
   const { Quilt } = getModels();
   const { quiltId } = req.params;
-  const { name, description, isPublic } = req.body || {};
+  const { name, description, isPublic, previewImageUrl } = req.body || {};
 
   try {
     const quilt = await Quilt.findByPk(quiltId);
@@ -145,6 +145,16 @@ router.patch("/:quiltId", authMiddleware, async (req, res) => {
 
     if (isPublic !== undefined) {
       quilt.isPublic = Boolean(isPublic);
+    }
+
+    if (previewImageUrl !== undefined) {
+      if (previewImageUrl === null || previewImageUrl === "") {
+        quilt.previewImageUrl = null;
+      } else if (typeof previewImageUrl !== "string") {
+        return res.status(400).json({ message: "Preview image URL must be a string." });
+      } else {
+        quilt.previewImageUrl = previewImageUrl.trim();
+      }
     }
 
     await quilt.save();
