@@ -14,6 +14,7 @@ const VALID_UUID = "e27c0be0-cf14-4ef3-b4f8-4e84cb83a2b0";
 test("normalizeSurface returns known values and falls back to unknown", () => {
   assert.equal(normalizeSurface("social_feed"), "social_feed");
   assert.equal(normalizeSurface("POST_DETAIL"), "post_detail");
+  assert.equal(normalizeSurface("marketplace"), "marketplace");
   assert.equal(normalizeSurface("not_valid"), "unknown");
   assert.equal(normalizeSurface(""), "unknown");
   assert.equal(normalizeSurface(undefined), "unknown");

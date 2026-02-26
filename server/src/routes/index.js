@@ -11,6 +11,7 @@ const notificationsRouter = require("./notifications");
 const messagesRouter = require("./messages");
 const searchRouter = require("./search");
 const recommendationsRouter = require("./recommendations");
+const marketplaceRouter = require("./marketplace");
 const adminRouter = require("./admin");
 const ratingsRouter = require("./ratings");
 
@@ -28,6 +29,7 @@ function registerRoutes(app) {
   app.use("/api/messages", messagesRouter);
   app.use("/api/search", searchRouter);
   app.use("/api/recommendations", recommendationsRouter);
+  app.use("/api/marketplace", marketplaceRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/ratings", ratingsRouter);
 }

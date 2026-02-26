@@ -6,6 +6,7 @@ export const REQUEST_SURFACES = Object.freeze({
   POST_DETAIL: "post_detail",
   PROFILE: "profile",
   SEARCH_RESULTS: "search_results",
+  MARKETPLACE: "marketplace",
   UNKNOWN: "unknown",
 });
 const ALLOWED_REQUEST_SURFACES = new Set(Object.values(REQUEST_SURFACES));
