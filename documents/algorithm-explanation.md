@@ -65,63 +65,49 @@ Plain English:
 ## 4) Scoring formula (explicit)
 
 ### 4.1 General scoring equation
-\[
+$$
 \text{score}(p,u,t)=\sum_{k \in F_t} w_k(u,t)\cdot x_k(p,u,t)
-\]
-
-Variable meanings:
-- `p`: a candidate post.
-- `u`: the current user.
-- `t`: feed type (`regular` or `market`).
-- `F_t`: feature set used for type `t`.
-- `x_k(p,u,t)`: value of feature `k` for post `p` and user `u` (usually normalized to `[0,1]`).
-- `w_k(u,t)`: effective weight for feature `k` (adaptive; depends on profile confidence + config).
-- `score(p,u,t)`: final numeric rank score (higher sorts earlier).
+$$
 
 ### 4.2 Regular feed expanded
-\[
+$$
 \begin{aligned}
-\text{score}_{regular}(p,u)=&
-w_{follow}\cdot followAff
-+w_{author}\cdot authorAff
-+w_{style}\cdot styleMatch \\
-&+w_{color}\cdot colorMatch
-+w_{brand}\cdot brandMatch
-+w_{vel}\cdot engagementVelocity
-+w_{fresh}\cdot freshness
+\text{score}_{\text{regular}}(p,u)=&
+w_{\text{follow}}\cdot \text{followAff}
++w_{\text{author}}\cdot \text{authorAff}
++w_{\text{style}}\cdot \text{styleMatch} \\
+&+w_{\text{color}}\cdot \text{colorMatch}
++w_{\text{brand}}\cdot \text{brandMatch}
++w_{\text{vel}}\cdot \text{engagementVelocity}
++w_{\text{fresh}}\cdot \text{freshness}
 \end{aligned}
-\]
+$$
 
 ### 4.3 Market feed expanded
-\[
+$$
 \begin{aligned}
-\text{score}_{market}(p,u)=&
-w_{follow}\cdot followAff
-+w_{author}\cdot authorAff
-+w_{cat}\cdot categoryMatch \\
-&+w_{brand}\cdot brandMatch
-+w_{size}\cdot sizeMatch
-+w_{price}\cdot priceBandMatch \\
-&+w_{cond}\cdot conditionMatch
-+w_{vel}\cdot engagementVelocity
-+w_{fresh}\cdot freshness
+\text{score}_{\text{market}}(p,u)=&
+w_{\text{follow}}\cdot \text{followAff}
++w_{\text{author}}\cdot \text{authorAff}
++w_{\text{cat}}\cdot \text{categoryMatch} \\
+&+w_{\text{brand}}\cdot \text{brandMatch}
++w_{\text{size}}\cdot \text{sizeMatch}
++w_{\text{price}}\cdot \text{priceBandMatch} \\
+&+w_{\text{cond}}\cdot \text{conditionMatch}
++w_{\text{vel}}\cdot \text{engagementVelocity}
++w_{\text{fresh}}\cdot \text{freshness}
 \end{aligned}
-\]
+$$
 
-Component meanings:
-- `followAff`: 1 if post author is followed, else 0.
-- `authorAff`: affinity to this specific author.
-- `styleMatch`, `colorMatch`, `brandMatch`, `categoryMatch`, `sizeMatch`, `priceBandMatch`, `conditionMatch`: affinity matches between post metadata and user profile maps.
-- `engagementVelocity`: recent momentum of the post (likes/comments/saves).
-- `freshness`: time-decay recency term.
+### 5) Freshness half-life formula (explicit)
+$$
+\text{freshness}(p,t)=\exp\left(-\ln(2)\cdot \frac{\text{ageDays}(p)}{H_t}\right)
+$$
 
----
+Runtime defaults:
+- $H_{\text{regular}} = 7$
+- $H_{\text{market}} = 14$
 
-## 5) Freshness half-life formula (explicit)
-
-\[
-freshness(p,t)=\exp\left(-\ln(2)\cdot \frac{ageDays(p)}{H_t}\right)
-\]
 
 Variable meanings:
 - `freshness(p,t)`: recency score in `[0,1]` used in ranking.
