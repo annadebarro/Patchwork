@@ -77,4 +77,7 @@ async function assertNoPendingMigrations(sequelize) {
 
 module.exports = {
   assertNoPendingMigrations,
+  tableExists,
+  getAppliedMigrations,
+  getMigrationFiles,
 };

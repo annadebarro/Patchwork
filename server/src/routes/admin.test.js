@@ -364,3 +364,87 @@ test("admin config rollback endpoint enforces confirmation", async () => {
     assert.match(payload.message, /confirm must be ROLLBACK/i);
   });
 });
+
+test("admin runs endpoint forwards track and date filters", async () => {
+  await withServer(async ({ app, port }) => {
+    let captured = null;
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+        listSimulationRunsFn: async (input) => {
+          captured = input;
+          return [];
+        },
+      })
+    );
+
+    const from = "2026-02-01T00:00:00.000Z";
+    const to = "2026-02-20T00:00:00.000Z";
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/admin/recommendations/runs?mode=synthetic&track=balanced&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=5`
+    );
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.mode, "synthetic");
+    assert.equal(captured.track, "balanced");
+    assert.equal(captured.limit, 5);
+    assert.equal(new Date(captured.from).toISOString(), from);
+    assert.equal(new Date(captured.to).toISOString(), to);
+  });
+});
+
+test("admin run detail endpoint returns run payload", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+        getSimulationRunByIdFn: async () => ({
+          id: "run-123",
+          mode: "synthetic",
+          params: { tracks: ["realism", "balanced"] },
+          resultSummary: {},
+        }),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/runs/run-123`);
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.equal(payload.run.id, "run-123");
+    assert.equal(payload.run.mode, "synthetic");
+  });
+});
+
+test("admin schema health endpoint returns diagnostics payload", async () => {
+  await withServer(async ({ app, port }) => {
+    app.use(
+      "/api/admin",
+      buildAdminRouter({
+        getModelsFn: createStubModels,
+        authMiddlewareFn: (req, _res, next) => {
+          req.user = { id: "admin-user" };
+          next();
+        },
+        adminMiddlewareFn: (_req, _res, next) => next(),
+      })
+    );
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/recommendations/schema-health`);
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.ok(payload.schemaHealth);
+    assert.ok(Array.isArray(payload.schemaHealth.checks));
+  });
+});

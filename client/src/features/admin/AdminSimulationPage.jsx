@@ -14,6 +14,15 @@ import {
 import { apiFetch, parseApiResponse, REQUEST_SURFACES } from "../../shared/api/http";
 import "./AdminSimulationPage.css";
 
+const LOCAL_STORAGE_KEYS = Object.freeze({
+  mode: "admin-sim-mode",
+  replayParams: "admin-sim-replay-params",
+  syntheticParams: "admin-sim-synthetic-params",
+  overrides: "admin-sim-overrides",
+  selectedTrack: "admin-sim-selected-track",
+  runFilters: "admin-sim-run-filters",
+});
+
 const DEFAULT_REPLAY = Object.freeze({
   days: 14,
   type: "all",
@@ -29,6 +38,17 @@ const DEFAULT_SYNTHETIC = Object.freeze({
   includeColdStart: true,
   adaptationMode: "light",
   personaMix: "balanced",
+  tracks: ["realism", "balanced"],
+  balancedPolicy: {
+    recencyShares: {
+      d0to7: 0.4,
+      d8to30: 0.35,
+      d31plus: 0.25,
+    },
+    authorCapPct: 0.1,
+    minUniqueAuthorsAbsolute: 12,
+    minUniqueAuthorsRatio: 0.35,
+  },
 });
 
 const DEFAULT_OVERRIDE_STATE = Object.freeze({
@@ -41,6 +61,44 @@ const DEFAULT_OVERRIDE_STATE = Object.freeze({
   blendMinMarketShare: 0.2,
   blendMaxMarketShare: 0.8,
 });
+
+const DEFAULT_RUN_FILTERS = Object.freeze({
+  mode: "all",
+  track: "all",
+  from: "",
+  to: "",
+});
+
+function safeReadJson(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeReadString(key, fallback) {
+  if (typeof window === "undefined") return fallback;
+  const value = window.localStorage.getItem(key);
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function safeWriteLocalStorage(key, value) {
+  if (typeof window === "undefined") return;
+  try {
+    if (typeof value === "string") {
+      window.localStorage.setItem(key, value);
+      return;
+    }
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore persistence errors.
+  }
+}
 
 function toLocalDateTime(value) {
   if (!value) return "n/a";
@@ -114,19 +172,19 @@ function abbreviateSliceLabel(slice) {
 
   const personaShort = personaType
     ? personaType
-        .replace(/_focused$/i, "")
-        .replace(/regular/i, "reg")
-        .replace(/market/i, "mkt")
-        .replace(/cold_start/i, "cold")
-        .replace(/mixed/i, "mix")
+      .replace(/_focused$/i, "")
+      .replace(/regular/i, "reg")
+      .replace(/market/i, "mkt")
+      .replace(/cold_start/i, "cold")
+      .replace(/mixed/i, "mix")
     : "";
 
   const surfaceShort = sourceSurface
     ? sourceSurface
-        .replace(/social_feed/i, "feed")
-        .replace(/post_detail/i, "detail")
-        .replace(/search_results/i, "search")
-        .replace(/profile/i, "profile")
+      .replace(/social_feed/i, "feed")
+      .replace(/post_detail/i, "detail")
+      .replace(/search_results/i, "search")
+      .replace(/profile/i, "profile")
     : "";
 
   const suffix = personaShort || (surfaceShort && surfaceShort !== "unknown" ? surfaceShort : "");
@@ -223,18 +281,91 @@ function parseOverrideState(activeConfig) {
   };
 }
 
+function buildRunsPath(filters = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", "40");
+
+  if (filters.mode && filters.mode !== "all") {
+    params.set("mode", filters.mode);
+  }
+  if (filters.track && filters.track !== "all") {
+    params.set("track", filters.track);
+  }
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  return `/admin/recommendations/runs?${params.toString()}`;
+}
+
+function parseTrackPreset(tracks) {
+  if (!Array.isArray(tracks) || tracks.length === 0) return "both";
+  const normalized = [...new Set(tracks.map((entry) => String(entry || "").trim().toLowerCase()))];
+  if (normalized.length === 2 && normalized.includes("realism") && normalized.includes("balanced")) {
+    return "both";
+  }
+  if (normalized.includes("realism") && normalized.length === 1) return "realism";
+  if (normalized.includes("balanced") && normalized.length === 1) return "balanced";
+  return "both";
+}
+
+function tracksForPreset(preset) {
+  if (preset === "realism") return ["realism"];
+  if (preset === "balanced") return ["balanced"];
+  return ["realism", "balanced"];
+}
+
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function AdminSimulationPage() {
   const [overview, setOverview] = useState(null);
+  const [schemaHealth, setSchemaHealth] = useState(null);
   const [activeConfig, setActiveConfig] = useState(null);
   const [configHistory, setConfigHistory] = useState([]);
   const [runs, setRuns] = useState([]);
   const [simulation, setSimulation] = useState(null);
   const [lastRunId, setLastRunId] = useState(null);
 
-  const [mode, setMode] = useState("synthetic");
-  const [replayParams, setReplayParams] = useState({ ...DEFAULT_REPLAY });
-  const [syntheticParams, setSyntheticParams] = useState({ ...DEFAULT_SYNTHETIC });
-  const [overrideState, setOverrideState] = useState({ ...DEFAULT_OVERRIDE_STATE });
+  const [mode, setMode] = useState(() => safeReadString(LOCAL_STORAGE_KEYS.mode, "synthetic"));
+  const [replayParams, setReplayParams] = useState(() => ({
+    ...DEFAULT_REPLAY,
+    ...safeReadJson(LOCAL_STORAGE_KEYS.replayParams, DEFAULT_REPLAY),
+  }));
+  const [syntheticParams, setSyntheticParams] = useState(() => ({
+    ...DEFAULT_SYNTHETIC,
+    ...safeReadJson(LOCAL_STORAGE_KEYS.syntheticParams, DEFAULT_SYNTHETIC),
+  }));
+  const [overrideState, setOverrideState] = useState(() => ({
+    ...DEFAULT_OVERRIDE_STATE,
+    ...safeReadJson(LOCAL_STORAGE_KEYS.overrides, DEFAULT_OVERRIDE_STATE),
+  }));
+
+  const [selectedTrack, setSelectedTrack] = useState(
+    () => safeReadString(LOCAL_STORAGE_KEYS.selectedTrack, "realism")
+  );
+  const [runFilters, setRunFilters] = useState(() => ({
+    ...DEFAULT_RUN_FILTERS,
+    ...safeReadJson(LOCAL_STORAGE_KEYS.runFilters, DEFAULT_RUN_FILTERS),
+  }));
+
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [loadingRunDetail, setLoadingRunDetail] = useState(false);
+  const [compareRunA, setCompareRunA] = useState("");
+  const [compareRunB, setCompareRunB] = useState("");
 
   const [loadingDashboard, setLoadingDashboard] = useState(true);
   const [runningSimulation, setRunningSimulation] = useState(false);
@@ -249,28 +380,49 @@ function AdminSimulationPage() {
   const [confirmAction, setConfirmAction] = useState(null);
   const [overrideInitialized, setOverrideInitialized] = useState(false);
 
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.mode, mode);
+  }, [mode]);
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.replayParams, replayParams);
+  }, [replayParams]);
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.syntheticParams, syntheticParams);
+  }, [syntheticParams]);
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.overrides, overrideState);
+  }, [overrideState]);
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.selectedTrack, selectedTrack);
+  }, [selectedTrack]);
+  useEffect(() => {
+    safeWriteLocalStorage(LOCAL_STORAGE_KEYS.runFilters, runFilters);
+  }, [runFilters]);
+
   const refreshDashboard = useCallback(async () => {
     setLoadingDashboard(true);
     setError("");
 
     try {
-      const [overviewData, activeData, historyData, runsData] = await Promise.all([
+      const [overviewData, activeData, historyData, runsData, schemaData] = await Promise.all([
         fetchAuthed("/admin/recommendations/overview"),
         fetchAuthed("/admin/recommendations/config/active"),
         fetchAuthed("/admin/recommendations/config/history?limit=25"),
-        fetchAuthed("/admin/recommendations/runs?limit=40"),
+        fetchAuthed(buildRunsPath(runFilters)),
+        fetchAuthed("/admin/recommendations/schema-health"),
       ]);
 
       setOverview(overviewData?.overview || null);
       setActiveConfig(activeData?.activeConfig || null);
       setConfigHistory(Array.isArray(historyData?.history) ? historyData.history : []);
       setRuns(Array.isArray(runsData?.runs) ? runsData.runs : []);
+      setSchemaHealth(schemaData?.schemaHealth || null);
     } catch (err) {
       setError(err.message || "Failed to load admin analytics.");
     } finally {
       setLoadingDashboard(false);
     }
-  }, []);
+  }, [runFilters]);
 
   useEffect(() => {
     void refreshDashboard();
@@ -284,13 +436,31 @@ function AdminSimulationPage() {
 
   const refreshRunsOnly = useCallback(async () => {
     setSyncingRuns(true);
+    setSimulationError("");
     try {
-      const runsData = await fetchAuthed("/admin/recommendations/runs?limit=40");
+      const runsData = await fetchAuthed(buildRunsPath(runFilters));
       setRuns(Array.isArray(runsData?.runs) ? runsData.runs : []);
     } catch (err) {
       setSimulationError(err.message || "Failed to refresh run history.");
     } finally {
       setSyncingRuns(false);
+    }
+  }, [runFilters]);
+
+  const fetchRunDetail = useCallback(async (runId) => {
+    if (!runId) return;
+    setSelectedRunId(runId);
+    setLoadingRunDetail(true);
+    setSimulationError("");
+
+    try {
+      const data = await fetchAuthed(`/admin/recommendations/runs/${runId}`);
+      setSelectedRun(data?.run || null);
+    } catch (err) {
+      setSimulationError(err.message || "Failed to load run detail.");
+      setSelectedRun(null);
+    } finally {
+      setLoadingRunDetail(false);
     }
   }, []);
 
@@ -374,49 +544,85 @@ function AdminSimulationPage() {
     }
   }, [refreshDashboard]);
 
+  const availableTracks = useMemo(() => {
+    const tracks = simulation?.tracks && typeof simulation.tracks === "object"
+      ? Object.keys(simulation.tracks)
+      : [];
+    return tracks.filter((track) => track === "realism" || track === "balanced");
+  }, [simulation]);
+
+  useEffect(() => {
+    if (!availableTracks.length) return;
+    if (!availableTracks.includes(selectedTrack)) {
+      setSelectedTrack(availableTracks[0]);
+    }
+  }, [availableTracks, selectedTrack]);
+
+  const effectiveTrack = useMemo(() => {
+    if (!availableTracks.length) return null;
+    if (availableTracks.includes(selectedTrack)) return selectedTrack;
+    return availableTracks[0];
+  }, [availableTracks, selectedTrack]);
+
+  const simulationView = useMemo(() => {
+    if (!simulation) return null;
+    if (effectiveTrack && simulation.tracks?.[effectiveTrack]) {
+      return simulation.tracks[effectiveTrack];
+    }
+    return simulation;
+  }, [simulation, effectiveTrack]);
+
+  const activeBias = useMemo(() => {
+    if (!simulation) return null;
+    if (effectiveTrack && simulation.biasDiagnostics?.[effectiveTrack]) {
+      return simulation.biasDiagnostics[effectiveTrack];
+    }
+    return simulationView?.biasDiagnostics || null;
+  }, [simulation, simulationView, effectiveTrack]);
+
   const comparisonChartData = useMemo(() => {
-    if (!simulation) return [];
+    if (!simulationView) return [];
     return [
       {
         metric: "nDCG@k",
-        baseline: Number(simulation?.baseline?.ndcgAtK || 0),
-        candidate: Number(simulation?.candidate?.ndcgAtK || 0),
+        baseline: Number(simulationView?.baseline?.ndcgAtK || 0),
+        candidate: Number(simulationView?.candidate?.ndcgAtK || 0),
       },
       {
         metric: "MRR@k",
-        baseline: Number(simulation?.baseline?.mrrAtK || 0),
-        candidate: Number(simulation?.candidate?.mrrAtK || 0),
+        baseline: Number(simulationView?.baseline?.mrrAtK || 0),
+        candidate: Number(simulationView?.candidate?.mrrAtK || 0),
       },
       {
         metric: "Gain@k",
-        baseline: Number(simulation?.baseline?.weightedGainAtK || 0),
-        candidate: Number(simulation?.candidate?.weightedGainAtK || 0),
+        baseline: Number(simulationView?.baseline?.weightedGainAtK || 0),
+        candidate: Number(simulationView?.candidate?.weightedGainAtK || 0),
       },
     ];
-  }, [simulation]);
+  }, [simulationView]);
 
   const deltaChartData = useMemo(() => {
-    if (!simulation) return [];
+    if (!simulationView) return [];
     return [
-      { metric: "nDCG", delta: Number(simulation?.delta?.ndcgAtK || 0) },
-      { metric: "MRR", delta: Number(simulation?.delta?.mrrAtK || 0) },
-      { metric: "Gain", delta: Number(simulation?.delta?.weightedGainAtK || 0) },
+      { metric: "nDCG", delta: Number(simulationView?.delta?.ndcgAtK || 0) },
+      { metric: "MRR", delta: Number(simulationView?.delta?.mrrAtK || 0) },
+      { metric: "Gain", delta: Number(simulationView?.delta?.weightedGainAtK || 0) },
     ];
-  }, [simulation]);
+  }, [simulationView]);
 
   const sliceChartData = useMemo(() => {
-    if (!Array.isArray(simulation?.slices)) return [];
-    return simulation.slices.slice(0, 10).map((slice) => ({
+    if (!Array.isArray(simulationView?.slices)) return [];
+    return simulationView.slices.slice(0, 10).map((slice) => ({
       sliceShort: abbreviateSliceLabel(slice),
       sliceFull: buildSliceLabel(slice),
       deltaNdcg: Number(slice?.delta?.ndcgAtK || 0),
       requests: Number(slice?.candidate?.requests || 0),
     }));
-  }, [simulation]);
+  }, [simulationView]);
 
   const coverageChartData = useMemo(() => {
-    if (!simulation?.coverage) return [];
-    const coverage = simulation.coverage;
+    if (!simulationView?.coverage) return [];
+    const coverage = simulationView.coverage;
     return Object.keys(coverage)
       .filter((key) => Number.isFinite(Number(coverage[key])))
       .slice(0, 8)
@@ -424,7 +630,7 @@ function AdminSimulationPage() {
         label: key.replace(/([A-Z])/g, " $1"),
         value: Number(coverage[key]),
       }));
-  }, [simulation]);
+  }, [simulationView]);
 
   const runTrendData = useMemo(() => {
     if (!Array.isArray(runs)) return [];
@@ -436,13 +642,9 @@ function AdminSimulationPage() {
         mode: run.mode === "synthetic" ? "synthetic" : "replay",
         createdAt: toLocalDateTime(run.createdAt),
         replayDeltaNdcg:
-          (run.mode === "synthetic" ? null : Number(run?.resultSummary?.delta?.ndcgAtK || 0)),
+          run.mode === "synthetic" ? null : Number(run?.resultSummary?.delta?.ndcgAtK || 0),
         syntheticDeltaNdcg:
-          (run.mode === "synthetic" ? Number(run?.resultSummary?.delta?.ndcgAtK || 0) : null),
-        replayRequests:
-          (run.mode === "synthetic" ? null : Number(run?.resultSummary?.candidate?.requests || 0)),
-        syntheticRequests:
-          (run.mode === "synthetic" ? Number(run?.resultSummary?.candidate?.requests || 0) : null),
+          run.mode === "synthetic" ? Number(run?.resultSummary?.delta?.ndcgAtK || 0) : null,
       }));
   }, [runs]);
 
@@ -461,9 +663,9 @@ function AdminSimulationPage() {
   }, [runs]);
 
   const sampleJourneys = useMemo(() => {
-    if (!Array.isArray(simulation?.sampleJourneys)) return [];
-    return simulation.sampleJourneys.slice(0, 3);
-  }, [simulation]);
+    if (!Array.isArray(simulationView?.sampleJourneys)) return [];
+    return simulationView.sampleJourneys.slice(0, 3);
+  }, [simulationView]);
 
   const activeConfigLabel = useMemo(() => {
     if (!activeConfig) return "not loaded";
@@ -471,11 +673,36 @@ function AdminSimulationPage() {
   }, [activeConfig]);
 
   const requestCount = Number(
-    simulation?.candidate?.requests ??
-      simulation?.coverage?.groupsEvaluated ??
-      simulation?.coverage?.sessionsEvaluated ??
-      0
+    simulationView?.candidate?.requests ??
+    simulationView?.coverage?.groupsEvaluated ??
+    simulationView?.coverage?.sessionsEvaluated ??
+    0
   );
+
+  const runById = useMemo(() => new Map(runs.map((run) => [run.id, run])), [runs]);
+
+  const runComparison = useMemo(() => {
+    if (!compareRunA || !compareRunB) return null;
+    if (compareRunA === compareRunB) return null;
+
+    const left = runById.get(compareRunA);
+    const right = runById.get(compareRunB);
+    if (!left || !right) return null;
+
+    const leftDelta = Number(left?.resultSummary?.delta?.ndcgAtK || 0);
+    const rightDelta = Number(right?.resultSummary?.delta?.ndcgAtK || 0);
+
+    return {
+      left,
+      right,
+      deltaNdcgDiff: Number((leftDelta - rightDelta).toFixed(4)),
+    };
+  }, [compareRunA, compareRunB, runById]);
+
+  const schemaIssues = useMemo(() => {
+    const checks = Array.isArray(schemaHealth?.checks) ? schemaHealth.checks : [];
+    return checks.filter((check) => check.status !== "ok");
+  }, [schemaHealth]);
 
   return (
     <div className="admin-analytics-page">
@@ -484,7 +711,10 @@ function AdminSimulationPage() {
           <div>
             <p className="admin-eyebrow">Patchwork Recommender Lab</p>
             <h1>Recommendation Analytics</h1>
-            <p>Run deterministic synthetic persona simulations or replay evaluation, compare ranking quality, and promote config versions safely.</p>
+            <p>
+              Run deterministic simulation tracks, compare realism vs balanced bias behavior,
+              inspect schema health, and promote config versions safely.
+            </p>
           </div>
           <div className="admin-hero-meta">
             <div>
@@ -503,7 +733,7 @@ function AdminSimulationPage() {
 
         {!loadingDashboard && !error ? (
           <>
-            <section className="admin-panel controls-grid">
+            <section className="admin-panel controls-grid controls-grid--sticky">
               <div className="control-card">
                 <h2>Simulation Mode</h2>
                 <div className="segmented-control">
@@ -653,6 +883,60 @@ function AdminSimulationPage() {
                         <option value="no">no</option>
                       </select>
                     </label>
+                    <label>
+                      Persona Mix
+                      <select
+                        value={syntheticParams.personaMix}
+                        onChange={(event) =>
+                          setSyntheticParams((prev) => ({
+                            ...prev,
+                            personaMix: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="balanced">balanced</option>
+                        <option value="regular_heavy">regular_heavy</option>
+                        <option value="market_heavy">market_heavy</option>
+                      </select>
+                    </label>
+                    <label>
+                      Track Set
+                      <select
+                        value={parseTrackPreset(syntheticParams.tracks)}
+                        onChange={(event) =>
+                          setSyntheticParams((prev) => ({
+                            ...prev,
+                            tracks: tracksForPreset(event.target.value),
+                          }))
+                        }
+                      >
+                        <option value="both">realism + balanced</option>
+                        <option value="realism">realism only</option>
+                        <option value="balanced">balanced only</option>
+                      </select>
+                    </label>
+                    <label>
+                      Balanced Author Cap %
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={syntheticParams.balancedPolicy?.authorCapPct ?? 0.1}
+                        onChange={(event) =>
+                          setSyntheticParams((prev) => ({
+                            ...prev,
+                            balancedPolicy: {
+                              ...(prev.balancedPolicy || {}),
+                              authorCapPct: parseFloatInRange(
+                                event.target.value,
+                                prev.balancedPolicy?.authorCapPct ?? 0.1,
+                                0.01,
+                                0.8
+                              ),
+                            },
+                          }))
+                        }
+                      />
+                    </label>
                   </div>
                 )}
 
@@ -662,6 +946,14 @@ function AdminSimulationPage() {
                   </button>
                   <button type="button" className="btn-secondary" onClick={refreshRunsOnly} disabled={syncingRuns}>
                     {syncingRuns ? "Refreshing..." : "Refresh Runs"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => simulation && downloadJson(`simulation-${Date.now()}.json`, simulation)}
+                    disabled={!simulation}
+                  >
+                    Export JSON
                   </button>
                 </div>
                 {simulationError ? <p className="admin-error-inline">{simulationError}</p> : null}
@@ -707,12 +999,7 @@ function AdminSimulationPage() {
                       onChange={(event) =>
                         setOverrideState((prev) => ({
                           ...prev,
-                          marketCategoryMatch: parseFloatInRange(
-                            event.target.value,
-                            prev.marketCategoryMatch,
-                            -10,
-                            10
-                          ),
+                          marketCategoryMatch: parseFloatInRange(event.target.value, prev.marketCategoryMatch, -10, 10),
                         }))
                       }
                     />
@@ -740,12 +1027,7 @@ function AdminSimulationPage() {
                       onChange={(event) =>
                         setOverrideState((prev) => ({
                           ...prev,
-                          marketPriceBandMatch: parseFloatInRange(
-                            event.target.value,
-                            prev.marketPriceBandMatch,
-                            -10,
-                            10
-                          ),
+                          marketPriceBandMatch: parseFloatInRange(event.target.value, prev.marketPriceBandMatch, -10, 10),
                         }))
                       }
                     />
@@ -759,12 +1041,7 @@ function AdminSimulationPage() {
                       onChange={(event) =>
                         setOverrideState((prev) => ({
                           ...prev,
-                          blendDefaultMarketShare: parseFloatInRange(
-                            event.target.value,
-                            prev.blendDefaultMarketShare,
-                            0,
-                            1
-                          ),
+                          blendDefaultMarketShare: parseFloatInRange(event.target.value, prev.blendDefaultMarketShare, 0, 1),
                         }))
                       }
                     />
@@ -778,12 +1055,7 @@ function AdminSimulationPage() {
                       onChange={(event) =>
                         setOverrideState((prev) => ({
                           ...prev,
-                          blendMinMarketShare: parseFloatInRange(
-                            event.target.value,
-                            prev.blendMinMarketShare,
-                            0,
-                            1
-                          ),
+                          blendMinMarketShare: parseFloatInRange(event.target.value, prev.blendMinMarketShare, 0, 1),
                         }))
                       }
                     />
@@ -797,12 +1069,7 @@ function AdminSimulationPage() {
                       onChange={(event) =>
                         setOverrideState((prev) => ({
                           ...prev,
-                          blendMaxMarketShare: parseFloatInRange(
-                            event.target.value,
-                            prev.blendMaxMarketShare,
-                            0,
-                            1
-                          ),
+                          blendMaxMarketShare: parseFloatInRange(event.target.value, prev.blendMaxMarketShare, 0, 1),
                         }))
                       }
                     />
@@ -853,6 +1120,29 @@ function AdminSimulationPage() {
               </article>
             </section>
 
+            {availableTracks.length ? (
+              <section className="admin-panel track-toggle-panel">
+                <h2>Track View</h2>
+                <div className="segmented-control">
+                  {availableTracks.map((track) => (
+                    <button
+                      key={track}
+                      type="button"
+                      className={selectedTrack === track ? "active" : ""}
+                      onClick={() => setSelectedTrack(track)}
+                    >
+                      {track}
+                    </button>
+                  ))}
+                </div>
+                {simulation?.trackComparison ? (
+                  <p className="chart-empty">
+                    balanced-vs-realism dNDCG lift delta {toSignedMetric(simulation.trackComparison?.liftDelta?.ndcgAtK || 0)}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+
             <section className="chart-grid">
               <article className="admin-panel chart-card">
                 <h2>Baseline vs Candidate</h2>
@@ -876,14 +1166,14 @@ function AdminSimulationPage() {
               <article className="admin-panel chart-card">
                 <h2>Delta Metrics</h2>
                 <div className="delta-summary">
-                  <p className={`delta-item ${metricClass(simulation?.delta?.ndcgAtK)}`}>
-                    dNDCG@k {toSignedMetric(simulation?.delta?.ndcgAtK)}
+                  <p className={`delta-item ${metricClass(simulationView?.delta?.ndcgAtK)}`}>
+                    dNDCG@k {toSignedMetric(simulationView?.delta?.ndcgAtK)}
                   </p>
-                  <p className={`delta-item ${metricClass(simulation?.delta?.mrrAtK)}`}>
-                    dMRR@k {toSignedMetric(simulation?.delta?.mrrAtK)}
+                  <p className={`delta-item ${metricClass(simulationView?.delta?.mrrAtK)}`}>
+                    dMRR@k {toSignedMetric(simulationView?.delta?.mrrAtK)}
                   </p>
-                  <p className={`delta-item ${metricClass(simulation?.delta?.weightedGainAtK)}`}>
-                    dGain@k {toSignedMetric(simulation?.delta?.weightedGainAtK)}
+                  <p className={`delta-item ${metricClass(simulationView?.delta?.weightedGainAtK)}`}>
+                    dGain@k {toSignedMetric(simulationView?.delta?.weightedGainAtK)}
                   </p>
                 </div>
                 {deltaChartData.length ? (
@@ -984,6 +1274,51 @@ function AdminSimulationPage() {
 
             <section className="data-grid">
               <article className="admin-panel">
+                <h2>Bias Diagnostics ({effectiveTrack || "primary"})</h2>
+                {activeBias ? (
+                  <div className="history-list">
+                    <div className="history-row">
+                      <div>
+                        <strong>Top Author Share</strong>
+                        <p>{toMetric(activeBias.topAuthorSharePct || 0, 2)}%</p>
+                      </div>
+                      <div>
+                        <strong>Unique Authors</strong>
+                        <p>{activeBias.uniqueAuthors || 0}</p>
+                      </div>
+                    </div>
+                    <div className="history-row">
+                      <div>
+                        <strong>Concentration Index</strong>
+                        <p>{toMetric(activeBias.concentrationIndex || 0, 4)}</p>
+                      </div>
+                      <div>
+                        <strong>Candidate Items</strong>
+                        <p>{activeBias.candidateItems || 0}</p>
+                      </div>
+                    </div>
+                    <div className="history-row">
+                      <div>
+                        <strong>Recency Mix 0-7d / 8-30d / 31+d</strong>
+                        <p>
+                          {toMetric(activeBias?.recencyMixPct?.d0to7 || 0, 1)}% / {toMetric(activeBias?.recencyMixPct?.d8to30 || 0, 1)}% /
+                          {" "}{toMetric(activeBias?.recencyMixPct?.d31plus || 0, 1)}%
+                        </p>
+                      </div>
+                      <div>
+                        <strong>Type Mix reg / mkt</strong>
+                        <p>
+                          {toMetric(activeBias?.typeMixPct?.regular || 0, 1)}% / {toMetric(activeBias?.typeMixPct?.market || 0, 1)}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="chart-empty">Bias diagnostics appear after synthetic runs.</p>
+                )}
+              </article>
+
+              <article className="admin-panel">
                 <h2>Sample Journeys</h2>
                 {sampleJourneys.length ? (
                   sampleJourneys.map((journey) => (
@@ -1001,7 +1336,159 @@ function AdminSimulationPage() {
                     </div>
                   ))
                 ) : (
-                  <p className="chart-empty">Sample journeys are shown for synthetic simulations.</p>
+                  <p className="chart-empty">Sample journeys are shown for simulation runs.</p>
+                )}
+              </article>
+
+              <article className="admin-panel">
+                <h2>Run Explorer</h2>
+                <div className="control-fields">
+                  <label>
+                    Mode Filter
+                    <select
+                      value={runFilters.mode}
+                      onChange={(event) => setRunFilters((prev) => ({ ...prev, mode: event.target.value }))}
+                    >
+                      <option value="all">all</option>
+                      <option value="synthetic">synthetic</option>
+                      <option value="replay">replay</option>
+                    </select>
+                  </label>
+                  <label>
+                    Track Filter
+                    <select
+                      value={runFilters.track}
+                      onChange={(event) => setRunFilters((prev) => ({ ...prev, track: event.target.value }))}
+                    >
+                      <option value="all">all</option>
+                      <option value="realism">realism</option>
+                      <option value="balanced">balanced</option>
+                    </select>
+                  </label>
+                  <label>
+                    From (ISO)
+                    <input
+                      type="text"
+                      value={runFilters.from}
+                      placeholder="2026-02-01T00:00:00.000Z"
+                      onChange={(event) => setRunFilters((prev) => ({ ...prev, from: event.target.value.trim() }))}
+                    />
+                  </label>
+                  <label>
+                    To (ISO)
+                    <input
+                      type="text"
+                      value={runFilters.to}
+                      placeholder="2026-02-28T23:59:59.999Z"
+                      onChange={(event) => setRunFilters((prev) => ({ ...prev, to: event.target.value.trim() }))}
+                    />
+                  </label>
+                </div>
+                <div className="control-actions">
+                  <button type="button" className="btn-secondary" onClick={refreshRunsOnly} disabled={syncingRuns}>
+                    {syncingRuns ? "Refreshing..." : "Apply Run Filters"}
+                  </button>
+                </div>
+
+                <div className="history-list">
+                  {runs.slice(0, 8).map((run) => (
+                    <div className="history-row" key={run.id}>
+                      <div>
+                        <strong>{run.mode}</strong>
+                        <p>{toLocalDateTime(run.createdAt)}</p>
+                      </div>
+                      <div>
+                        <p>dNDCG {toSignedMetric(run?.resultSummary?.delta?.ndcgAtK || 0)}</p>
+                        <button type="button" className="btn-secondary" onClick={() => fetchRunDetail(run.id)}>
+                          Open
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {loadingRunDetail ? <p className="chart-empty">Loading run detail...</p> : null}
+                {selectedRunId && !loadingRunDetail && selectedRun ? (
+                  <div className="journey-card">
+                    <header>
+                      <strong>Run Detail</strong>
+                      <span>{selectedRun.id}</span>
+                    </header>
+                    <p>mode {selectedRun.mode}</p>
+                    <p>created {toLocalDateTime(selectedRun.createdAt)}</p>
+                    <p>dNDCG {toSignedMetric(selectedRun?.resultSummary?.delta?.ndcgAtK || 0)}</p>
+                    <p>tracks {Array.isArray(selectedRun?.params?.tracks) ? selectedRun.params.tracks.join(", ") : "n/a"}</p>
+                  </div>
+                ) : null}
+              </article>
+
+              <article className="admin-panel">
+                <h2>Run Comparison</h2>
+                <div className="control-fields">
+                  <label>
+                    Run A
+                    <select value={compareRunA} onChange={(event) => setCompareRunA(event.target.value)}>
+                      <option value="">Select run</option>
+                      {runs.map((run) => (
+                        <option key={run.id} value={run.id}>
+                          {run.id.slice(0, 8)} • {run.mode}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Run B
+                    <select value={compareRunB} onChange={(event) => setCompareRunB(event.target.value)}>
+                      <option value="">Select run</option>
+                      {runs.map((run) => (
+                        <option key={run.id} value={run.id}>
+                          {run.id.slice(0, 8)} • {run.mode}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {runComparison ? (
+                  <div className="journey-card">
+                    <p>A: {runComparison.left.id}</p>
+                    <p>B: {runComparison.right.id}</p>
+                    <p>dNDCG(A-B): {toSignedMetric(runComparison.deltaNdcgDiff)}</p>
+                  </div>
+                ) : (
+                  <p className="chart-empty">Select two different runs to compare.</p>
+                )}
+              </article>
+
+              <article className="admin-panel">
+                <h2>Schema Health</h2>
+                {schemaHealth ? (
+                  <>
+                    <p className={schemaHealth.healthy ? "chart-empty" : "admin-error-inline"}>
+                      {schemaHealth.humanSummary}
+                    </p>
+                    {schemaIssues.length ? (
+                      <div className="history-list">
+                        {schemaIssues.map((item) => (
+                          <div className="history-row" key={item.table}>
+                            <div>
+                              <strong>{item.table}</strong>
+                              <p>{item.purpose}</p>
+                            </div>
+                            <div>
+                              <p>{item.status}</p>
+                              <p>
+                                missing cols {Array.isArray(item.missingColumns) ? item.missingColumns.length : 0}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="chart-empty">All tracked schema checks are healthy.</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="chart-empty">Schema diagnostics unavailable.</p>
                 )}
               </article>
 

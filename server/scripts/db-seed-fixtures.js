@@ -8,9 +8,13 @@ const { insertRows } = require("./db-restore-json");
 const { TABLE_INSERT_ORDER } = require("./db-backup-helpers");
 
 const DEFAULT_SEED = 422;
-const USER_COUNT = 120;
-const POST_COUNT = 1500;
-const REGULAR_POST_RATIO = 0.6;
+const DEFAULT_USER_COUNT = 250;
+const DEFAULT_POST_COUNT = 5000;
+const DEFAULT_REGULAR_POST_RATIO = 0.6;
+const DEFAULT_USER_DAYS_BACK = 420;
+const DEFAULT_POST_DAYS_BACK = 120;
+const DEFAULT_RECENT_WINDOW_DAYS = 14;
+const DEFAULT_RECENT_AUTHOR_CAP = 8;
 const UNKNOWN = "unknown";
 
 const ONBOARDING_STATUS = ["completed", "completed", "completed", "skipped", "pending"];
@@ -211,6 +215,27 @@ function normalizeRecordTimestamps(record, fallbackDate) {
   };
 }
 
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parseBooleanArg(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function getSeedAdminProfile() {
+  return {
+    email: (process.env.SEED_ADMIN_EMAIL || "admin@patchwork.com").toLowerCase(),
+    username: (process.env.SEED_ADMIN_USERNAME || "admin").toLowerCase(),
+    name: process.env.SEED_ADMIN_NAME || "Patchwork Admin",
+  };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (const token of argv) {
@@ -253,44 +278,80 @@ function normalizeRowsForColumns(rows, dbColumns) {
   });
 }
 
-function buildUsers(rng, { adminId, adminPasswordHash }) {
+function createUniqueUserIdentity({ rng, ordinal, usernameSet, emailSet, maxAttempts = 5000 }) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const salt = `${randomInt(rng, 1000, 9999)}${attempt ? `_${attempt}` : ""}`;
+    const username = `user_${ordinal}_${salt}`.toLowerCase();
+    const email = `${username}@patchwork.local`;
+    if (usernameSet.has(username) || emailSet.has(email)) continue;
+    usernameSet.add(username);
+    emailSet.add(email);
+    return { username, email };
+  }
+  throw new Error(`Unable to generate a unique synthetic identity for user ordinal ${ordinal}.`);
+}
+
+function buildUsers(
+  rng,
+  {
+    adminId,
+    adminPasswordHash,
+    userCount,
+    userDaysBack = DEFAULT_USER_DAYS_BACK,
+    append = false,
+    includeAdmin = true,
+    existingEmailSet = new Set(),
+    existingUsernameSet = new Set(),
+  }
+) {
   const users = [];
   const userIds = [];
+  const usernameSet = new Set(Array.from(existingUsernameSet).map((value) => String(value).toLowerCase()));
+  const emailSet = new Set(Array.from(existingEmailSet).map((value) => String(value).toLowerCase()));
 
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@patchwork.com";
-  const adminUsername = (process.env.SEED_ADMIN_USERNAME || "admin").toLowerCase();
-  const adminName = process.env.SEED_ADMIN_NAME || "Patchwork Admin";
+  const { email: adminEmail, username: adminUsername, name: adminName } = getSeedAdminProfile();
 
-  const adminCreatedAt = randomDateWithinDays(rng, 180);
-  users.push(
-    normalizeRecordTimestamps({
-      id: adminId,
-      email: adminEmail.toLowerCase(),
-      username: adminUsername,
-      name: adminName,
-      role: "admin",
-      bio: "Admin profile for recommendation simulation tooling.",
-      size_preferences: {
-        tops: [{ label: "M" }],
-        bottoms: [{ label: "32" }],
-        dresses: [],
-        outerwear: [{ label: "M" }],
-        shoes: [{ label: "9" }],
-      },
-      favorite_brands: pickManyUnique(rng, BRAND_POOL, 4),
-      onboarding_status: "completed",
-      onboarding_prompt_seen: true,
-      profile_picture: `https://picsum.photos/seed/${adminUsername}/400/400`,
-      password_hash: adminPasswordHash,
-    }, adminCreatedAt)
-  );
-  userIds.push(adminId);
+  if (includeAdmin) {
+    const adminCreatedAt = randomDateWithinDays(rng, userDaysBack);
+    users.push(
+      normalizeRecordTimestamps({
+        id: adminId,
+        email: adminEmail,
+        username: adminUsername,
+        name: adminName,
+        role: "admin",
+        bio: "Admin profile for recommendation simulation tooling.",
+        size_preferences: {
+          tops: [{ label: "M" }],
+          bottoms: [{ label: "32" }],
+          dresses: [],
+          outerwear: [{ label: "M" }],
+          shoes: [{ label: "9" }],
+        },
+        favorite_brands: pickManyUnique(rng, BRAND_POOL, 4),
+        onboarding_status: "completed",
+        onboarding_prompt_seen: true,
+        profile_picture: `https://picsum.photos/seed/${adminUsername}/400/400`,
+        password_hash: adminPasswordHash,
+      }, adminCreatedAt)
+    );
+    userIds.push(adminId);
+    usernameSet.add(adminUsername);
+    emailSet.add(adminEmail);
+  }
 
-  for (let index = 1; index < USER_COUNT; index += 1) {
+  const regularUsersTarget = append ? userCount : Math.max(userCount - (includeAdmin ? 1 : 0), 0);
+  for (let index = 0; index < regularUsersTarget; index += 1) {
     const id = seededUuid(rng);
     userIds.push(id);
-    const username = `user_${index}_${randomInt(rng, 1000, 9999)}`;
-    const createdAt = randomDateWithinDays(rng, 420);
+    const ordinal = index + 1;
+    const { username, email } = createUniqueUserIdentity({
+      rng,
+      ordinal,
+      usernameSet,
+      emailSet,
+    });
+    const createdAt = randomDateWithinDays(rng, userDaysBack);
     const preferredBrands = pickManyUnique(rng, BRAND_POOL, randomInt(rng, 2, 6));
     const onboardingStatus = pickOne(rng, ONBOARDING_STATUS);
 
@@ -298,9 +359,9 @@ function buildUsers(rng, { adminId, adminPasswordHash }) {
       normalizeRecordTimestamps(
         {
           id,
-          email: `${username}@patchwork.local`,
+          email,
           username,
-          name: `User ${index}`,
+          name: `User ${ordinal}`,
           role: "user",
           bio: `${pickOne(rng, BIO_SNIPPETS)} · ${pickOne(rng, STYLE_TAG_POOL)}`,
           size_preferences: {
@@ -324,17 +385,61 @@ function buildUsers(rng, { adminId, adminPasswordHash }) {
   return { users, userIds };
 }
 
-function buildPosts(rng, userIds) {
+function chooseAuthorIdForPost({
+  rng,
+  userIds,
+  createdAt,
+  recentWindowDays,
+  recentAuthorCap,
+  recentCountByAuthor,
+}) {
+  const isRecent =
+    createdAt.getTime() >= Date.now() - recentWindowDays * 24 * 60 * 60 * 1000;
+
+  if (!isRecent) {
+    return pickOne(rng, userIds);
+  }
+
+  const constrainedUserIds = userIds.filter(
+    (id) => (recentCountByAuthor.get(id) || 0) < recentAuthorCap
+  );
+  const selected = constrainedUserIds.length
+    ? pickOne(rng, constrainedUserIds)
+    : pickOne(rng, userIds);
+
+  recentCountByAuthor.set(selected, (recentCountByAuthor.get(selected) || 0) + 1);
+  return selected;
+}
+
+function buildPosts(
+  rng,
+  userIds,
+  {
+    postCount,
+    regularPostRatio,
+    postDaysBack,
+    recentWindowDays,
+    recentAuthorCap,
+  }
+) {
   const posts = [];
   const postOwnerById = new Map();
-  const regularCount = Math.round(POST_COUNT * REGULAR_POST_RATIO);
+  const regularCount = Math.round(postCount * regularPostRatio);
+  const recentCountByAuthor = new Map();
 
-  for (let index = 0; index < POST_COUNT; index += 1) {
+  for (let index = 0; index < postCount; index += 1) {
     const id = seededUuid(rng);
     const isRegular = index < regularCount;
     const type = isRegular ? "regular" : "market";
-    const userId = pickOne(rng, userIds);
-    const createdAt = randomDateWithinDays(rng, 120);
+    const createdAt = randomDateWithinDays(rng, postDaysBack);
+    const userId = chooseAuthorIdForPost({
+      rng,
+      userIds,
+      createdAt,
+      recentWindowDays,
+      recentAuthorCap,
+      recentCountByAuthor,
+    });
     const styleTags = pickManyUnique(rng, STYLE_TAG_POOL, randomInt(rng, 1, isRegular ? 4 : 3));
     const colorTags = rng() < 0.75
       ? pickManyUnique(rng, COLOR_TAG_POOL, randomInt(rng, 1, 3))
@@ -879,18 +984,48 @@ function buildUserActions({
   return rows;
 }
 
-function buildFixtureData({ seed, adminPasswordHash, defaultUserPasswordHash }) {
+function buildFixtureData({
+  seed,
+  adminPasswordHash,
+  defaultUserPasswordHash,
+  userCount = DEFAULT_USER_COUNT,
+  postCount = DEFAULT_POST_COUNT,
+  regularPostRatio = DEFAULT_REGULAR_POST_RATIO,
+  userDaysBack = DEFAULT_USER_DAYS_BACK,
+  postDaysBack = DEFAULT_POST_DAYS_BACK,
+  recentWindowDays = DEFAULT_RECENT_WINDOW_DAYS,
+  recentAuthorCap = DEFAULT_RECENT_AUTHOR_CAP,
+  append = false,
+  includeAdmin = true,
+  existingEmailSet = new Set(),
+  existingUsernameSet = new Set(),
+}) {
   const rng = createRng(seed);
   const adminId = seededUuid(rng);
 
-  const { users, userIds } = buildUsers(rng, { adminId, adminPasswordHash });
+  const { users, userIds } = buildUsers(rng, {
+    adminId,
+    adminPasswordHash,
+    userCount,
+    userDaysBack,
+    append,
+    includeAdmin,
+    existingEmailSet,
+    existingUsernameSet,
+  });
   for (const user of users) {
     if (!user.password_hash) {
       user.password_hash = defaultUserPasswordHash;
     }
   }
 
-  const { posts, postOwnerById } = buildPosts(rng, userIds);
+  const { posts, postOwnerById } = buildPosts(rng, userIds, {
+    postCount,
+    regularPostRatio,
+    postDaysBack,
+    recentWindowDays,
+    recentAuthorCap,
+  });
   const follows = buildFollows(rng, userIds);
   const likes = buildLikes(rng, userIds, posts);
   const comments = buildComments(rng, userIds, posts);
@@ -944,6 +1079,14 @@ function buildFixtureData({ seed, adminPasswordHash, defaultUserPasswordHash }) 
 async function seedFixtures({
   databaseUrl = process.env.DATABASE_URL,
   seed = DEFAULT_SEED,
+  userCount = DEFAULT_USER_COUNT,
+  postCount = DEFAULT_POST_COUNT,
+  regularPostRatio = DEFAULT_REGULAR_POST_RATIO,
+  userDaysBack = DEFAULT_USER_DAYS_BACK,
+  postDaysBack = DEFAULT_POST_DAYS_BACK,
+  recentWindowDays = DEFAULT_RECENT_WINDOW_DAYS,
+  recentAuthorCap = DEFAULT_RECENT_AUTHOR_CAP,
+  append = false,
 } = {}) {
   if (!databaseUrl) {
     throw new Error("Missing DATABASE_URL.");
@@ -953,16 +1096,63 @@ async function seedFixtures({
   const defaultPassword = process.env.SEED_USER_PASSWORD || "Patchwork123!";
   const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
   const defaultUserPasswordHash = await bcrypt.hash(defaultPassword, 10);
-
-  const fixtureData = buildFixtureData({
-    seed,
-    adminPasswordHash,
-    defaultUserPasswordHash,
-  });
+  const { email: adminEmail } = getSeedAdminProfile();
 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
+    let existingEmailSet = new Set();
+    let existingUsernameSet = new Set();
+    let includeAdmin = true;
+    let effectiveSeed = seed;
+
+    if (append) {
+      const [{ rows: identityRows }, { rows: countRows }] = await Promise.all([
+        client.query("SELECT email, username FROM users"),
+        client.query(
+          `
+            SELECT
+              (SELECT COUNT(*)::bigint FROM users) AS users_count,
+              (SELECT COUNT(*)::bigint FROM posts) AS posts_count
+          `
+        ),
+      ]);
+
+      existingEmailSet = new Set(
+        identityRows
+          .map((row) => (row.email ? String(row.email).toLowerCase() : null))
+          .filter(Boolean)
+      );
+      existingUsernameSet = new Set(
+        identityRows
+          .map((row) => (row.username ? String(row.username).toLowerCase() : null))
+          .filter(Boolean)
+      );
+      includeAdmin = !existingEmailSet.has(adminEmail);
+
+      const usersCount = Number.parseInt(countRows[0]?.users_count, 10) || 0;
+      const postsCount = Number.parseInt(countRows[0]?.posts_count, 10) || 0;
+      const seedOffset = usersCount * 131 + postsCount * 17;
+      effectiveSeed = (seed + seedOffset) >>> 0;
+    }
+
+    const fixtureData = buildFixtureData({
+      seed: effectiveSeed,
+      adminPasswordHash,
+      defaultUserPasswordHash,
+      userCount,
+      postCount,
+      regularPostRatio,
+      userDaysBack,
+      postDaysBack,
+      recentWindowDays,
+      recentAuthorCap,
+      append,
+      includeAdmin,
+      existingEmailSet,
+      existingUsernameSet,
+    });
+
     await client.query("BEGIN");
 
     for (const tableName of TABLE_INSERT_ORDER) {
@@ -978,7 +1168,7 @@ async function seedFixtures({
     for (const tableName of TABLE_INSERT_ORDER) {
       counts[tableName] = (fixtureData[tableName] || []).length;
     }
-    return { seed, counts };
+    return { seed, effectiveSeed, append, counts };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -991,8 +1181,56 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const seedValue = Number.parseInt(args.seed, 10);
   const seed = Number.isFinite(seedValue) ? seedValue : DEFAULT_SEED;
-  const result = await seedFixtures({ seed });
+  const userCountValue = Number.parseInt(args.users, 10);
+  const postCountValue = Number.parseInt(args.posts, 10);
+  const regularRatioValue = Number.parseFloat(args.regularRatio);
+  const userDaysBackValue = Number.parseInt(args.userDaysBack, 10);
+  const postDaysBackValue = Number.parseInt(args.postDaysBack, 10);
+  const recentWindowDaysValue = Number.parseInt(args.recentWindowDays, 10);
+  const recentAuthorCapValue = Number.parseInt(args.recentAuthorCap, 10);
+  const append = parseBooleanArg(args.append, false);
+
+  const userCount = Number.isFinite(userCountValue)
+    ? clampNumber(userCountValue, 2, 5000)
+    : DEFAULT_USER_COUNT;
+  const postCount = Number.isFinite(postCountValue)
+    ? clampNumber(postCountValue, 10, 200000)
+    : DEFAULT_POST_COUNT;
+  const regularPostRatio =
+    Number.isFinite(regularRatioValue) && regularRatioValue >= 0 && regularRatioValue <= 1
+      ? regularRatioValue
+      : DEFAULT_REGULAR_POST_RATIO;
+  const userDaysBack = Number.isFinite(userDaysBackValue)
+    ? clampNumber(userDaysBackValue, 1, 3650)
+    : DEFAULT_USER_DAYS_BACK;
+  const postDaysBack = Number.isFinite(postDaysBackValue)
+    ? clampNumber(postDaysBackValue, 1, 3650)
+    : DEFAULT_POST_DAYS_BACK;
+  const recentWindowDays = Number.isFinite(recentWindowDaysValue)
+    ? clampNumber(recentWindowDaysValue, 1, 120)
+    : DEFAULT_RECENT_WINDOW_DAYS;
+  const recentAuthorCap = Number.isFinite(recentAuthorCapValue)
+    ? clampNumber(recentAuthorCapValue, 1, 200)
+    : DEFAULT_RECENT_AUTHOR_CAP;
+
+  const result = await seedFixtures({
+    seed,
+    userCount,
+    postCount,
+    regularPostRatio,
+    userDaysBack,
+    postDaysBack,
+    recentWindowDays,
+    recentAuthorCap,
+    append,
+  });
   console.log(`Fixture seeding complete (seed=${result.seed}).`);
+  console.log(
+    `Seed options: append=${append} users=${userCount} posts=${postCount} regularRatio=${regularPostRatio} userDaysBack=${userDaysBack} postDaysBack=${postDaysBack} recentWindowDays=${recentWindowDays} recentAuthorCap=${recentAuthorCap}`
+  );
+  if (result.effectiveSeed !== result.seed) {
+    console.log(`Append seed offset applied. effectiveSeed=${result.effectiveSeed}`);
+  }
   console.log(`Inserted rows: ${JSON.stringify(result.counts, null, 2)}`);
 }
 
@@ -1006,5 +1244,6 @@ if (require.main === module) {
 module.exports = {
   buildFixtureData,
   parseArgs,
+  parseBooleanArg,
   seedFixtures,
 };

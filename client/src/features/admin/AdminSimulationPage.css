@@ -95,6 +95,24 @@
   gap: 1rem;
 }
 
+.controls-grid--sticky {
+  position: sticky;
+  top: 0.6rem;
+  z-index: 10;
+}
+
+.track-toggle-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.track-toggle-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .control-card h2 {
   margin: 0 0 0.75rem;
   font-size: 1rem;
@@ -148,6 +166,7 @@
 
 .control-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.65rem;
   margin-top: 0.9rem;
 }

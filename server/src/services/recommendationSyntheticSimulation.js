@@ -15,6 +15,21 @@ const MAX_SESSIONS = 5000;
 const MAX_USERS = 1000;
 const MAX_K = 100;
 
+const TRACK_REALISM = "realism";
+const TRACK_BALANCED = "balanced";
+const ALLOWED_TRACKS = Object.freeze([TRACK_REALISM, TRACK_BALANCED]);
+
+const DEFAULT_BALANCED_POLICY = Object.freeze({
+  recencyShares: {
+    d0to7: 0.4,
+    d8to30: 0.35,
+    d31plus: 0.25,
+  },
+  authorCapPct: 0.1,
+  minUniqueAuthorsAbsolute: 12,
+  minUniqueAuthorsRatio: 0.35,
+});
+
 const DEFAULT_PARAMS = Object.freeze({
   seed: "patchwork-sim-v1",
   sessions: 1000,
@@ -24,6 +39,8 @@ const DEFAULT_PARAMS = Object.freeze({
   includeColdStart: true,
   adaptationMode: "light",
   personaMix: "balanced",
+  tracks: [TRACK_REALISM, TRACK_BALANCED],
+  balancedPolicy: DEFAULT_BALANCED_POLICY,
 });
 
 function clamp(value, min, max) {
@@ -60,12 +77,6 @@ function createDeterministicRng(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function randomChoice(array, rng) {
-  if (!Array.isArray(array) || array.length === 0) return null;
-  const index = Math.floor(rng() * array.length);
-  return array[index] || null;
 }
 
 function sampleWithoutReplacement(array, count, rng) {
@@ -242,24 +253,57 @@ function cloneProfile(profile) {
   };
 }
 
+function normalizePersonaMix(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "regular_heavy") return "regular_heavy";
+  if (normalized === "market_heavy") return "market_heavy";
+  return "balanced";
+}
+
+function buildPersonaWeights({ includeColdStart, personaMix }) {
+  const coldShare = includeColdStart ? 0.15 : 0;
+  let base;
+
+  if (personaMix === "regular_heavy") {
+    base = {
+      regular_focused: 0.55,
+      market_focused: 0.15,
+      mixed: 0.3,
+    };
+  } else if (personaMix === "market_heavy") {
+    base = {
+      regular_focused: 0.15,
+      market_focused: 0.55,
+      mixed: 0.3,
+    };
+  } else {
+    base = {
+      regular_focused: 1 / 3,
+      market_focused: 1 / 3,
+      mixed: 1 / 3,
+    };
+  }
+
+  const nonColdShare = 1 - coldShare;
+  const weights = {
+    regular_focused: base.regular_focused * nonColdShare,
+    market_focused: base.market_focused * nonColdShare,
+    mixed: base.mixed * nonColdShare,
+    cold_start: coldShare,
+  };
+
+  if (!includeColdStart) {
+    delete weights.cold_start;
+  }
+
+  return weights;
+}
+
 function buildPersonaTypeQueue({ users, includeColdStart, rng, personaMix }) {
   const queue = [];
-  const coldShare = includeColdStart ? 0.15 : 0;
-  const mix = personaMix === "balanced"
-    ? {
-        regular_focused: (1 - coldShare) / 3,
-        market_focused: (1 - coldShare) / 3,
-        mixed: (1 - coldShare) / 3,
-        cold_start: coldShare,
-      }
-    : {
-        regular_focused: (1 - coldShare) / 3,
-        market_focused: (1 - coldShare) / 3,
-        mixed: (1 - coldShare) / 3,
-        cold_start: coldShare,
-      };
-
+  const mix = buildPersonaWeights({ includeColdStart, personaMix });
   const choices = Object.keys(mix);
+
   const cumulative = [];
   let running = 0;
   for (const key of choices) {
@@ -287,7 +331,7 @@ function selectFeedType({ globalType, profile, rng }) {
   return rng() < clamp(profile.marketShare, 0.1, 0.9) ? "market" : "regular";
 }
 
-function buildCandidateSet({ universe, feedType, candidateSize, profile, rng }) {
+function buildRealismCandidateSet({ universe, feedType, candidateSize, profile, rng }) {
   if (feedType === "regular") {
     return sampleWithoutReplacement(universe.regular, candidateSize, rng);
   }
@@ -302,15 +346,341 @@ function buildCandidateSet({ universe, feedType, candidateSize, profile, rng }) 
   return sampleWithoutReplacement([...regular, ...market], candidateSize, rng);
 }
 
+function normalizeTrackList(value) {
+  const asArray = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+
+  const normalized = asArray
+    .map((entry) => String(entry || "").trim().toLowerCase())
+    .filter((entry) => ALLOWED_TRACKS.includes(entry));
+
+  const deduped = [...new Set(normalized)];
+  if (deduped.length === 0) {
+    return [...DEFAULT_PARAMS.tracks];
+  }
+  return deduped;
+}
+
+function normalizeBalancedPolicy(input = {}) {
+  const raw = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const recencyRaw = raw.recencyShares && typeof raw.recencyShares === "object" ? raw.recencyShares : {};
+
+  const recencyShares = {
+    d0to7: clamp(Number(recencyRaw.d0to7 ?? DEFAULT_BALANCED_POLICY.recencyShares.d0to7) || 0, 0, 1),
+    d8to30: clamp(Number(recencyRaw.d8to30 ?? DEFAULT_BALANCED_POLICY.recencyShares.d8to30) || 0, 0, 1),
+    d31plus: clamp(Number(recencyRaw.d31plus ?? DEFAULT_BALANCED_POLICY.recencyShares.d31plus) || 0, 0, 1),
+  };
+
+  const total = recencyShares.d0to7 + recencyShares.d8to30 + recencyShares.d31plus;
+  if (total <= 0) {
+    recencyShares.d0to7 = DEFAULT_BALANCED_POLICY.recencyShares.d0to7;
+    recencyShares.d8to30 = DEFAULT_BALANCED_POLICY.recencyShares.d8to30;
+    recencyShares.d31plus = DEFAULT_BALANCED_POLICY.recencyShares.d31plus;
+  } else {
+    recencyShares.d0to7 = recencyShares.d0to7 / total;
+    recencyShares.d8to30 = recencyShares.d8to30 / total;
+    recencyShares.d31plus = recencyShares.d31plus / total;
+  }
+
+  return {
+    recencyShares,
+    authorCapPct: clamp(
+      Number(raw.authorCapPct ?? DEFAULT_BALANCED_POLICY.authorCapPct) || DEFAULT_BALANCED_POLICY.authorCapPct,
+      0.01,
+      0.8
+    ),
+    minUniqueAuthorsAbsolute: clamp(
+      Number.parseInt(raw.minUniqueAuthorsAbsolute, 10) || DEFAULT_BALANCED_POLICY.minUniqueAuthorsAbsolute,
+      1,
+      200
+    ),
+    minUniqueAuthorsRatio: clamp(
+      Number(raw.minUniqueAuthorsRatio ?? DEFAULT_BALANCED_POLICY.minUniqueAuthorsRatio) ||
+        DEFAULT_BALANCED_POLICY.minUniqueAuthorsRatio,
+      0.05,
+      1
+    ),
+  };
+}
+
+function getAgeBucket(post, now) {
+  const ageDays = (now.getTime() - toEpochMs(post.createdAt)) / (24 * 60 * 60 * 1000);
+  if (ageDays <= 7) return "d0to7";
+  if (ageDays <= 30) return "d8to30";
+  return "d31plus";
+}
+
+function normalizeAuthorId(post) {
+  const authorId = post?.author?.id;
+  if (authorId) return String(authorId);
+  return "unknown";
+}
+
+function shuffleCopy(array, rng) {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = tmp;
+  }
+  return copy;
+}
+
+function buildTargetCounts(total, shares, keys) {
+  if (total <= 0) return Object.fromEntries(keys.map((key) => [key, 0]));
+
+  const rows = keys.map((key) => {
+    const exact = total * (shares[key] || 0);
+    const floor = Math.floor(exact);
+    return {
+      key,
+      floor,
+      remainder: exact - floor,
+    };
+  });
+
+  let assigned = rows.reduce((sum, row) => sum + row.floor, 0);
+  let remaining = total - assigned;
+
+  rows.sort((a, b) => b.remainder - a.remainder || a.key.localeCompare(b.key));
+  for (let index = 0; index < rows.length && remaining > 0; index += 1) {
+    rows[index].floor += 1;
+    remaining -= 1;
+  }
+
+  const result = {};
+  for (const row of rows) {
+    result[row.key] = row.floor;
+  }
+  return result;
+}
+
+function buildBalancedFromPool({ pool, target, now, policy, rng }) {
+  if (!Array.isArray(pool) || pool.length === 0 || target <= 0) return [];
+
+  const recencyKeys = ["d0to7", "d8to30", "d31plus"];
+  const authorCapStart = Math.max(1, Math.ceil(target * policy.authorCapPct));
+
+  const buckets = {
+    d0to7: [],
+    d8to30: [],
+    d31plus: [],
+  };
+
+  for (const post of pool) {
+    buckets[getAgeBucket(post, now)].push(post);
+  }
+
+  for (const key of recencyKeys) {
+    buckets[key] = shuffleCopy(buckets[key], rng);
+  }
+
+  const targetByBucket = buildTargetCounts(target, policy.recencyShares, recencyKeys);
+  const selected = [];
+  const selectedIds = new Set();
+  const authorCounts = new Map();
+  const uniqueAuthors = new Set();
+
+  const totalAvailableUniqueAuthors = new Set(pool.map((post) => normalizeAuthorId(post))).size;
+  const minimumUniqueAuthors = Math.min(
+    target,
+    totalAvailableUniqueAuthors,
+    Math.max(policy.minUniqueAuthorsAbsolute, Math.ceil(target * policy.minUniqueAuthorsRatio))
+  );
+
+  function canTake(post, authorCap) {
+    const postId = String(post.id);
+    if (selectedIds.has(postId)) return false;
+    const authorId = normalizeAuthorId(post);
+    return (authorCounts.get(authorId) || 0) < authorCap;
+  }
+
+  function takePost(post) {
+    const postId = String(post.id);
+    const authorId = normalizeAuthorId(post);
+    selected.push(post);
+    selectedIds.add(postId);
+    authorCounts.set(authorId, (authorCounts.get(authorId) || 0) + 1);
+    uniqueAuthors.add(authorId);
+  }
+
+  function fillFromBucket(key, desired, authorCap) {
+    if (desired <= 0) return;
+    let remaining = desired;
+
+    if (uniqueAuthors.size < minimumUniqueAuthors) {
+      for (const post of buckets[key]) {
+        if (remaining <= 0) break;
+        if (!canTake(post, authorCap)) continue;
+        const authorId = normalizeAuthorId(post);
+        if (uniqueAuthors.has(authorId)) continue;
+        takePost(post);
+        remaining -= 1;
+      }
+    }
+
+    if (remaining <= 0) return;
+
+    for (const post of buckets[key]) {
+      if (remaining <= 0) break;
+      if (!canTake(post, authorCap)) continue;
+      takePost(post);
+      remaining -= 1;
+    }
+  }
+
+  for (const key of recencyKeys) {
+    fillFromBucket(key, targetByBucket[key], authorCapStart);
+  }
+
+  let authorCap = authorCapStart;
+  let guard = 0;
+  while (selected.length < target && guard < 20) {
+    guard += 1;
+    let before = selected.length;
+    for (const key of recencyKeys) {
+      fillFromBucket(key, target - selected.length, authorCap);
+      if (selected.length >= target) break;
+    }
+    if (selected.length > before) continue;
+    authorCap += 1;
+  }
+
+  if (selected.length < target) {
+    const fallback = shuffleCopy(pool, rng);
+    for (const post of fallback) {
+      if (selected.length >= target) break;
+      const postId = String(post.id);
+      if (selectedIds.has(postId)) continue;
+      takePost(post);
+    }
+  }
+
+  if (selected.length <= 1 || uniqueAuthors.size >= minimumUniqueAuthors) {
+    return selected.slice(0, target);
+  }
+
+  const unseenCandidates = shuffleCopy(pool, rng).filter((post) => {
+    const postId = String(post.id);
+    if (selectedIds.has(postId)) return false;
+    return !uniqueAuthors.has(normalizeAuthorId(post));
+  });
+
+  if (!unseenCandidates.length) return selected.slice(0, target);
+
+  const positionsByAuthor = new Map();
+  for (let index = 0; index < selected.length; index += 1) {
+    const authorId = normalizeAuthorId(selected[index]);
+    if (!positionsByAuthor.has(authorId)) {
+      positionsByAuthor.set(authorId, []);
+    }
+    positionsByAuthor.get(authorId).push(index);
+  }
+
+  const replaceableIndices = [];
+  for (const [authorId, indices] of positionsByAuthor.entries()) {
+    if ((authorCounts.get(authorId) || 0) <= 1) continue;
+    for (let i = 1; i < indices.length; i += 1) {
+      replaceableIndices.push(indices[i]);
+    }
+  }
+
+  for (let i = 0; i < replaceableIndices.length && unseenCandidates.length > 0; i += 1) {
+    if (uniqueAuthors.size >= minimumUniqueAuthors) break;
+    const replaceIndex = replaceableIndices[i];
+    const newPost = unseenCandidates.shift();
+    const oldPost = selected[replaceIndex];
+
+    const oldId = String(oldPost.id);
+    const oldAuthor = normalizeAuthorId(oldPost);
+    const newId = String(newPost.id);
+    const newAuthor = normalizeAuthorId(newPost);
+
+    selected[replaceIndex] = newPost;
+    selectedIds.delete(oldId);
+    selectedIds.add(newId);
+
+    authorCounts.set(oldAuthor, Math.max(0, (authorCounts.get(oldAuthor) || 0) - 1));
+    if ((authorCounts.get(oldAuthor) || 0) === 0) {
+      uniqueAuthors.delete(oldAuthor);
+    }
+
+    authorCounts.set(newAuthor, (authorCounts.get(newAuthor) || 0) + 1);
+    uniqueAuthors.add(newAuthor);
+  }
+
+  return selected.slice(0, target);
+}
+
+function buildBalancedCandidateSet({ universe, feedType, candidateSize, profile, rng, now, balancedPolicy }) {
+  if (feedType === "regular") {
+    return buildBalancedFromPool({
+      pool: universe.regular,
+      target: candidateSize,
+      now,
+      policy: balancedPolicy,
+      rng,
+    });
+  }
+
+  if (feedType === "market") {
+    return buildBalancedFromPool({
+      pool: universe.market,
+      target: candidateSize,
+      now,
+      policy: balancedPolicy,
+      rng,
+    });
+  }
+
+  const marketTarget = Math.round(candidateSize * clamp(profile.marketShare, 0.2, 0.8));
+  const regularTarget = Math.max(0, candidateSize - marketTarget);
+
+  const regular = buildBalancedFromPool({
+    pool: universe.regular,
+    target: regularTarget,
+    now,
+    policy: balancedPolicy,
+    rng,
+  });
+  const market = buildBalancedFromPool({
+    pool: universe.market,
+    target: marketTarget,
+    now,
+    policy: balancedPolicy,
+    rng,
+  });
+
+  let combined = [...regular, ...market];
+  if (combined.length < candidateSize) {
+    const topUp = buildBalancedFromPool({
+      pool: [...universe.regular, ...universe.market],
+      target: candidateSize - combined.length,
+      now,
+      policy: balancedPolicy,
+      rng,
+    });
+    combined = [...combined, ...topUp];
+  }
+
+  if (combined.length > candidateSize) {
+    return sampleWithoutReplacement(combined, candidateSize, rng);
+  }
+
+  return combined;
+}
+
 function sigmoid(value) {
   return 1 / (1 + Math.exp(-value));
 }
 
 function computeLatentUtility(post, profile, config, now, rng) {
   const context = { profile, config, now };
-  const scored = post.type === "market"
-    ? scoreMarketPost(post, context)
-    : scoreRegularPost(post, context);
+  const scored = post.type === "market" ? scoreMarketPost(post, context) : scoreRegularPost(post, context);
   const base = scored.score / 6.5;
   const ageDays = (now.getTime() - toEpochMs(post.createdAt)) / (24 * 60 * 60 * 1000);
   const noveltyBoost = ageDays < 14 ? 0.06 : 0;
@@ -565,6 +935,107 @@ function summarizeTopPosts(posts, actionByPostId, k) {
   });
 }
 
+function createBiasAccumulator() {
+  return {
+    candidateItems: 0,
+    authorCounts: new Map(),
+    typeCounts: {
+      regular: 0,
+      market: 0,
+    },
+    recencyCounts: {
+      d0to7: 0,
+      d8to30: 0,
+      d31plus: 0,
+    },
+  };
+}
+
+function accumulateBiasDiagnostics({ accumulator, candidatePosts, now }) {
+  for (const post of candidatePosts) {
+    accumulator.candidateItems += 1;
+
+    const authorId = normalizeAuthorId(post);
+    accumulator.authorCounts.set(authorId, (accumulator.authorCounts.get(authorId) || 0) + 1);
+
+    if (post.type === "market") {
+      accumulator.typeCounts.market += 1;
+    } else {
+      accumulator.typeCounts.regular += 1;
+    }
+
+    accumulator.recencyCounts[getAgeBucket(post, now)] += 1;
+  }
+}
+
+function toPct(value, total, digits = 2) {
+  if (!total) return 0;
+  return Number(((value / total) * 100).toFixed(digits));
+}
+
+function finalizeBiasDiagnostics(accumulator) {
+  const total = accumulator.candidateItems;
+  const authorEntries = [...accumulator.authorCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const topAuthorCount = authorEntries.length ? authorEntries[0][1] : 0;
+
+  let concentrationIndex = 0;
+  if (total > 0) {
+    for (const [, count] of authorEntries) {
+      const share = count / total;
+      concentrationIndex += share * share;
+    }
+  }
+
+  return {
+    candidateItems: total,
+    uniqueAuthors: authorEntries.length,
+    topAuthorSharePct: toPct(topAuthorCount, total),
+    concentrationIndex: Number(concentrationIndex.toFixed(4)),
+    topAuthors: authorEntries.slice(0, 5).map(([authorId, count]) => ({
+      authorId,
+      count,
+      sharePct: toPct(count, total),
+    })),
+    recencyMixPct: {
+      d0to7: toPct(accumulator.recencyCounts.d0to7, total),
+      d8to30: toPct(accumulator.recencyCounts.d8to30, total),
+      d31plus: toPct(accumulator.recencyCounts.d31plus, total),
+    },
+    typeMixPct: {
+      regular: toPct(accumulator.typeCounts.regular, total),
+      market: toPct(accumulator.typeCounts.market, total),
+    },
+  };
+}
+
+function buildTrackComparison({ tracks }) {
+  const realism = tracks?.[TRACK_REALISM];
+  const balanced = tracks?.[TRACK_BALANCED];
+  if (!realism || !balanced) return null;
+
+  return {
+    candidateDelta: {
+      ndcgAtK: Number((balanced.candidate.ndcgAtK - realism.candidate.ndcgAtK).toFixed(4)),
+      mrrAtK: Number((balanced.candidate.mrrAtK - realism.candidate.mrrAtK).toFixed(4)),
+      weightedGainAtK: Number((balanced.candidate.weightedGainAtK - realism.candidate.weightedGainAtK).toFixed(4)),
+    },
+    liftDelta: {
+      ndcgAtK: Number((balanced.delta.ndcgAtK - realism.delta.ndcgAtK).toFixed(4)),
+      mrrAtK: Number((balanced.delta.mrrAtK - realism.delta.mrrAtK).toFixed(4)),
+      weightedGainAtK: Number((balanced.delta.weightedGainAtK - realism.delta.weightedGainAtK).toFixed(4)),
+    },
+    biasDelta: {
+      topAuthorSharePct: Number(
+        ((balanced.biasDiagnostics?.topAuthorSharePct || 0) - (realism.biasDiagnostics?.topAuthorSharePct || 0)).toFixed(2)
+      ),
+      concentrationIndex: Number(
+        ((balanced.biasDiagnostics?.concentrationIndex || 0) - (realism.biasDiagnostics?.concentrationIndex || 0)).toFixed(4)
+      ),
+      uniqueAuthors: (balanced.biasDiagnostics?.uniqueAuthors || 0) - (realism.biasDiagnostics?.uniqueAuthors || 0),
+    },
+  };
+}
+
 async function loadUniverse({ models, config, now }) {
   const effectiveConfig = getEffectiveConfig(config);
   const poolConfig = effectiveConfig.pools;
@@ -583,9 +1054,7 @@ async function loadUniverse({ models, config, now }) {
         isPublic: true,
         type: "regular",
         createdAt: {
-          [Op.gte]: new Date(
-            now.getTime() - poolConfig.regularRecencyDays * 24 * 60 * 60 * 1000
-          ),
+          [Op.gte]: new Date(now.getTime() - poolConfig.regularRecencyDays * 24 * 60 * 60 * 1000),
         },
       },
       order: [["createdAt", "DESC"]],
@@ -598,9 +1067,7 @@ async function loadUniverse({ models, config, now }) {
         type: "market",
         isSold: false,
         createdAt: {
-          [Op.gte]: new Date(
-            now.getTime() - poolConfig.marketRecencyDays * 24 * 60 * 60 * 1000
-          ),
+          [Op.gte]: new Date(now.getTime() - poolConfig.marketRecencyDays * 24 * 60 * 60 * 1000),
         },
       },
       order: [["createdAt", "DESC"]],
@@ -645,115 +1112,136 @@ function parseSyntheticParams(input = {}) {
     type: normalizeFeedType(input.type || DEFAULT_PARAMS.type),
     k: clamp(Number.parseInt(input.k, 10) || DEFAULT_PARAMS.k, 1, MAX_K),
     includeColdStart:
-      typeof input.includeColdStart === "boolean"
-        ? input.includeColdStart
-        : DEFAULT_PARAMS.includeColdStart,
+      typeof input.includeColdStart === "boolean" ? input.includeColdStart : DEFAULT_PARAMS.includeColdStart,
     adaptationMode:
       typeof input.adaptationMode === "string" && input.adaptationMode.trim()
         ? input.adaptationMode.trim().toLowerCase()
         : DEFAULT_PARAMS.adaptationMode,
-    personaMix:
-      typeof input.personaMix === "string" && input.personaMix.trim()
-        ? input.personaMix.trim().toLowerCase()
-        : DEFAULT_PARAMS.personaMix,
+    personaMix: normalizePersonaMix(input.personaMix || DEFAULT_PARAMS.personaMix),
+    tracks: normalizeTrackList(input.tracks),
+    balancedPolicy: normalizeBalancedPolicy(input.balancedPolicy),
   };
 }
 
-async function buildSyntheticRecommendationSimulation({
-  models,
-  now = new Date(),
-  params = {},
-  candidateConfig = DEFAULT_RECOMMENDATION_CONFIG,
-} = {}) {
-  const parsed = parseSyntheticParams(params);
-  const rng = createDeterministicRng(parsed.seed);
-  const effectiveCandidateConfig = getEffectiveConfig(candidateConfig);
-  const universe = await loadUniverse({
-    models,
-    config: effectiveCandidateConfig,
-    now,
+function buildTrackUsers(personaTypes, catalogByType) {
+  return personaTypes.map((personaType, index) => {
+    const sourceProfile = catalogByType.get(personaType) || catalogByType.get("mixed");
+    return {
+      id: `synthetic-user-${index + 1}`,
+      cohort: personaType === "cold_start" ? "new" : "returning",
+      personaType,
+      baselineProfile: cloneProfile(sourceProfile),
+      candidateProfile: cloneProfile(sourceProfile),
+    };
   });
+}
 
-  const catalog = createPersonaCatalog({
-    universe,
-    includeColdStart: parsed.includeColdStart,
-    rng,
-  });
-  const catalogByType = new Map(catalog.map((entry) => [entry.type, entry.profile]));
-  const personaTypes = buildPersonaTypeQueue({
-    users: parsed.users,
-    includeColdStart: parsed.includeColdStart,
-    rng,
-    personaMix: parsed.personaMix,
-  });
+function rankCandidatePosts({ candidatePosts, profile, config, now, feedType }) {
+  const baselineRankedPosts = sortChronological(candidatePosts);
+  const scoreContext = { now, config, profile };
+  const regularScored = [];
+  const marketScored = [];
 
-  const users = personaTypes.map((personaType, index) => ({
-    id: `synthetic-user-${index + 1}`,
-    cohort: personaType === "cold_start" ? "new" : "returning",
-    personaType,
-    baselineProfile: cloneProfile(catalogByType.get(personaType) || catalogByType.get("mixed")),
-    candidateProfile: cloneProfile(catalogByType.get(personaType) || catalogByType.get("mixed")),
-  }));
+  for (const post of candidatePosts) {
+    if (post.type === "regular") {
+      regularScored.push(scoreRegularPost(post, scoreContext));
+    } else if (post.type === "market") {
+      marketScored.push(scoreMarketPost(post, scoreContext));
+    }
+  }
 
+  const candidateRankedPosts = blendAndDiversify({
+    regularScored,
+    marketScored,
+    profile,
+    requestedType: feedType === "all" ? null : feedType,
+    limit: candidatePosts.length,
+    config,
+  }).posts;
+
+  return {
+    baselineRankedPosts,
+    candidateRankedPosts,
+  };
+}
+
+function runSyntheticTrack({
+  track,
+  parsed,
+  trackUsers,
+  universe,
+  config,
+  now,
+  rng,
+}) {
   const baselineAgg = createAggregate();
   const candidateAgg = createAggregate();
   const sliceAgg = new Map();
   const sampleJourneys = [];
+  const biasAccumulator = createBiasAccumulator();
   let totalCandidates = 0;
 
   for (let sessionIndex = 0; sessionIndex < parsed.sessions; sessionIndex += 1) {
-    const user = users[sessionIndex % users.length];
+    const user = trackUsers[sessionIndex % trackUsers.length];
+
     const feedType = selectFeedType({
       globalType: parsed.type,
       profile: user.candidateProfile,
       rng,
     });
-    const candidatePosts = buildCandidateSet({
-      universe,
-      feedType,
-      candidateSize: Math.max(parsed.k * 5, 120),
-      profile: user.candidateProfile,
-      rng,
-    });
+
+    const candidateSize = Math.max(parsed.k * 5, 120);
+    const candidatePosts = track === TRACK_BALANCED
+      ? buildBalancedCandidateSet({
+          universe,
+          feedType,
+          candidateSize,
+          profile: user.candidateProfile,
+          rng,
+          now,
+          balancedPolicy: parsed.balancedPolicy,
+        })
+      : buildRealismCandidateSet({
+          universe,
+          feedType,
+          candidateSize,
+          profile: user.candidateProfile,
+          rng,
+        });
+
     if (!candidatePosts.length) continue;
 
     totalCandidates += candidatePosts.length;
+    accumulateBiasDiagnostics({
+      accumulator: biasAccumulator,
+      candidatePosts,
+      now,
+    });
 
-    const baselineRankedPosts = sortChronological(candidatePosts);
-    const scoreContext = { now, config: effectiveCandidateConfig, profile: user.candidateProfile };
-    const regularScored = [];
-    const marketScored = [];
-    for (const post of candidatePosts) {
-      if (post.type === "regular") {
-        regularScored.push(scoreRegularPost(post, scoreContext));
-      } else if (post.type === "market") {
-        marketScored.push(scoreMarketPost(post, scoreContext));
-      }
-    }
-    const candidateRankedPosts = blendAndDiversify({
-      regularScored,
-      marketScored,
+    const { baselineRankedPosts, candidateRankedPosts } = rankCandidatePosts({
+      candidatePosts,
       profile: user.candidateProfile,
-      requestedType: feedType === "all" ? null : feedType,
-      limit: candidatePosts.length,
-      config: effectiveCandidateConfig,
-    }).posts;
+      config,
+      now,
+      feedType,
+    });
 
     const baselineInteractions = simulateSessionInteractions({
       rankedPosts: baselineRankedPosts,
       candidatePosts,
       k: parsed.k,
       profile: user.baselineProfile,
-      config: effectiveCandidateConfig,
+      config,
       now,
       rng,
     });
+
     const candidateInteractions = simulateSessionInteractions({
       rankedPosts: candidateRankedPosts,
       candidatePosts,
       k: parsed.k,
       profile: user.candidateProfile,
-      config: effectiveCandidateConfig,
+      config,
       now,
       rng,
     });
@@ -796,12 +1284,14 @@ async function buildSyntheticRecommendationSimulation({
         candidate: createAggregate(),
       });
     }
+
     const slice = sliceAgg.get(sliceKey);
     addMetric(slice.baseline, baselineMetric);
     addMetric(slice.candidate, candidateMetric);
 
     if (sampleJourneys.length < 6) {
       sampleJourneys.push({
+        track,
         sessionIndex: sessionIndex + 1,
         userId: user.id,
         personaType: user.personaType,
@@ -809,16 +1299,8 @@ async function buildSyntheticRecommendationSimulation({
         feedType,
         baselineEvents: baselineInteractions.events,
         candidateEvents: candidateInteractions.events,
-        baselineTop: summarizeTopPosts(
-          baselineRankedPosts,
-          baselineInteractions.actionByPostId,
-          parsed.k
-        ),
-        candidateTop: summarizeTopPosts(
-          candidateRankedPosts,
-          candidateInteractions.actionByPostId,
-          parsed.k
-        ),
+        baselineTop: summarizeTopPosts(baselineRankedPosts, baselineInteractions.actionByPostId, parsed.k),
+        candidateTop: summarizeTopPosts(candidateRankedPosts, candidateInteractions.actionByPostId, parsed.k),
       });
     }
   }
@@ -843,33 +1325,117 @@ async function buildSyntheticRecommendationSimulation({
     })
     .sort((a, b) => b.candidate.requests - a.candidate.requests);
 
+  const biasDiagnostics = finalizeBiasDiagnostics(biasAccumulator);
+
+  return {
+    baseline,
+    candidate,
+    delta,
+    coverage: {
+      track,
+      syntheticUsers: trackUsers.length,
+      sessionsPlanned: parsed.sessions,
+      sessionsEvaluated: candidate.requests,
+      averageCandidates: candidate.requests > 0 ? Number((totalCandidates / candidate.requests).toFixed(2)) : 0,
+      coldStartUsers: trackUsers.filter((entry) => entry.personaType === "cold_start").length,
+    },
+    slices,
+    sampleJourneys,
+    biasDiagnostics,
+    notes: track === TRACK_BALANCED
+      ? [
+          "Balanced track: author cap + recency bucketed candidate sampling.",
+          "Same deterministic seed and personas as realism track.",
+        ]
+      : [
+          "Realism track: baseline synthetic candidate sampling over real inventory.",
+          "Same deterministic seed and personas as balanced track.",
+        ],
+  };
+}
+
+async function buildSyntheticRecommendationSimulation({
+  models,
+  now = new Date(),
+  params = {},
+  candidateConfig = DEFAULT_RECOMMENDATION_CONFIG,
+} = {}) {
+  const parsed = parseSyntheticParams(params);
+  const effectiveCandidateConfig = getEffectiveConfig(candidateConfig);
+  const universe = await loadUniverse({
+    models,
+    config: effectiveCandidateConfig,
+    now,
+  });
+
+  const seedRng = createDeterministicRng(`${parsed.seed}:persona-catalog`);
+  const catalog = createPersonaCatalog({
+    universe,
+    includeColdStart: parsed.includeColdStart,
+    rng: seedRng,
+  });
+  const catalogByType = new Map(catalog.map((entry) => [entry.type, entry.profile]));
+
+  const personaRng = createDeterministicRng(`${parsed.seed}:persona-queue`);
+  const personaTypes = buildPersonaTypeQueue({
+    users: parsed.users,
+    includeColdStart: parsed.includeColdStart,
+    rng: personaRng,
+    personaMix: parsed.personaMix,
+  });
+
+  const tracks = {};
+  for (const track of parsed.tracks) {
+    const trackRng = createDeterministicRng(`${parsed.seed}:track:${track}`);
+    const trackUsers = buildTrackUsers(personaTypes, catalogByType);
+
+    tracks[track] = runSyntheticTrack({
+      track,
+      parsed,
+      trackUsers,
+      universe,
+      config: effectiveCandidateConfig,
+      now,
+      rng: trackRng,
+    });
+  }
+
+  const primaryTrack = tracks[TRACK_REALISM] || tracks[parsed.tracks[0]];
+  const trackComparison = buildTrackComparison({ tracks });
+
   return {
     mode: "synthetic",
     generatedAt: now.toISOString(),
     algorithmBaseline: "chronological_fallback",
     algorithmCandidate: "hybrid_v1",
     params: parsed,
-    baseline,
-    candidate,
-    delta,
-    coverage: {
-      syntheticUsers: users.length,
-      sessionsPlanned: parsed.sessions,
-      sessionsEvaluated: candidate.requests,
-      averageCandidates: candidate.requests > 0 ? Number((totalCandidates / candidate.requests).toFixed(2)) : 0,
-      coldStartUsers: users.filter((entry) => entry.personaType === "cold_start").length,
-    },
-    slices,
-    sampleJourneys,
+    tracks,
+    trackComparison,
+    biasDiagnostics: Object.fromEntries(
+      Object.entries(tracks).map(([track, result]) => [track, result.biasDiagnostics || {}])
+    ),
+
+    // Backwards compatibility aliases (realism-primary)
+    baseline: primaryTrack?.baseline || {},
+    candidate: primaryTrack?.candidate || {},
+    delta: primaryTrack?.delta || {},
+    coverage: primaryTrack?.coverage || {},
+    slices: primaryTrack?.slices || [],
+    sampleJourneys: primaryTrack?.sampleJourneys || [],
+
     candidateConfig: effectiveCandidateConfig,
     notes: [
       "Synthetic deterministic persona simulation on real post inventory.",
       "No synthetic user actions were written to production telemetry tables.",
+      "Tracks can include realism and balanced candidate sampling for bias-aware evaluation.",
     ],
   };
 }
 
 module.exports = {
+  ALLOWED_TRACKS,
+  DEFAULT_BALANCED_POLICY,
   buildSyntheticRecommendationSimulation,
+  normalizeTrackList,
   parseSyntheticParams,
 };
