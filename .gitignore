@@ -4,5 +4,9 @@ dist
 *.log
 client/.env
 server/.env
+client/.env.backup*
+server/.env.backup*
+client/.env.*.local
+server/.env.*.local
 .DS_Store
 server/backups/db/
