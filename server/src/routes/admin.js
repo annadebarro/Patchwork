@@ -8,7 +8,10 @@ const {
   normalizeSimulationMode,
   parseReplayParams,
 } = require("../services/recommendationSimulation");
-const { parseSyntheticParams } = require("../services/recommendationSyntheticSimulation");
+const {
+  ALLOWED_TRACKS,
+  parseSyntheticParams,
+} = require("../services/recommendationSyntheticSimulation");
 const {
   DEFAULT_SCOPE,
   applyConfig,
@@ -17,7 +20,12 @@ const {
   mergeConfig,
   rollbackConfig,
 } = require("../services/recommendationConfig");
-const { createSimulationRun, listSimulationRuns } = require("../services/recommendationSimulationRuns");
+const {
+  createSimulationRun,
+  getSimulationRunById,
+  listSimulationRuns,
+} = require("../services/recommendationSimulationRuns");
+const { inspectFeatureSchemaHealth } = require("../services/schemaDoctor");
 
 const FEED_ACTIONS = ["feed_impression", "feed_click", "feed_dwell"];
 const DEFAULT_ACTION_WINDOW_DAYS = 7;
@@ -55,6 +63,16 @@ function normalizeOptionalString(value, maxLength = 2000) {
 
 function parseHistoryLimit(value) {
   return parsePositiveInt(value, 20, 1, MAX_RUN_HISTORY);
+}
+
+function parseIsoDate(value) {
+  if (!value) return { valid: true, date: null };
+  if (typeof value !== "string") return { valid: false, message: "Date filters must be ISO strings." };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { valid: false, message: "Date filters must be valid ISO date strings." };
+  }
+  return { valid: true, date };
 }
 
 function parseSimulationQuery(query) {
@@ -143,17 +161,31 @@ function parseConfigRollbackPayload(body = {}) {
 }
 
 function summarizeSimulationResult(simulation) {
+  const primaryTrack = simulation?.tracks?.realism || null;
+  const fallbackBaseline = simulation?.baseline || primaryTrack?.baseline || {};
+  const fallbackCandidate = simulation?.candidate || primaryTrack?.candidate || {};
+  const fallbackDelta = simulation?.delta || primaryTrack?.delta || {};
+  const fallbackCoverage = simulation?.coverage || primaryTrack?.coverage || {};
+  const fallbackSlices = Array.isArray(simulation?.slices)
+    ? simulation.slices
+    : Array.isArray(primaryTrack?.slices)
+      ? primaryTrack.slices
+      : [];
+
   return {
     mode: simulation?.mode || "replay",
     generatedAt: simulation?.generatedAt || null,
     algorithmBaseline: simulation?.algorithmBaseline || "chronological_fallback",
     algorithmCandidate: simulation?.algorithmCandidate || "hybrid_v1",
     params: simulation?.params || {},
-    baseline: simulation?.baseline || {},
-    candidate: simulation?.candidate || {},
-    delta: simulation?.delta || {},
-    coverage: simulation?.coverage || {},
-    topSlices: Array.isArray(simulation?.slices) ? simulation.slices.slice(0, 8) : [],
+    baseline: fallbackBaseline,
+    candidate: fallbackCandidate,
+    delta: fallbackDelta,
+    coverage: fallbackCoverage,
+    tracks: simulation?.tracks || null,
+    trackComparison: simulation?.trackComparison || null,
+    biasDiagnostics: simulation?.biasDiagnostics || null,
+    topSlices: fallbackSlices.slice(0, 8),
   };
 }
 
@@ -325,6 +357,7 @@ function buildAdminRouter({
   buildRecommendationSimulationFn = buildRecommendationSimulation,
   createSimulationRunFn = createSimulationRun,
   listSimulationRunsFn = listSimulationRuns,
+  getSimulationRunByIdFn = getSimulationRunById,
   getActiveConfigFn = getActiveConfig,
   listConfigHistoryFn = listConfigHistory,
   applyConfigFn = applyConfig,
@@ -453,19 +486,77 @@ function buildAdminRouter({
     authMiddlewareFn,
     adminMiddlewareFn,
     async (req, res) => {
+      const fromDate = parseIsoDate(req.query?.from);
+      if (!fromDate.valid) return res.status(400).json({ message: fromDate.message });
+
+      const toDate = parseIsoDate(req.query?.to);
+      if (!toDate.valid) return res.status(400).json({ message: toDate.message });
+
+      if (fromDate.date && toDate.date && fromDate.date > toDate.date) {
+        return res.status(400).json({ message: "from must be less than or equal to to." });
+      }
+
       try {
         const models = getModelsFn();
         const rawMode = typeof req.query?.mode === "string" ? req.query.mode.trim().toLowerCase() : "";
         const mode = rawMode === "replay" || rawMode === "synthetic" ? rawMode : null;
+        const rawTrack = typeof req.query?.track === "string" ? req.query.track.trim().toLowerCase() : "";
+        const track = ALLOWED_TRACKS.includes(rawTrack) ? rawTrack : null;
         const runs = await listSimulationRunsFn({
           models,
           mode,
+          track,
+          from: fromDate.date,
+          to: toDate.date,
           limit: parseHistoryLimit(req.query?.limit),
         });
         return res.json({ runs });
       } catch (err) {
         console.error("Admin recommendation run history failed:", err);
         return res.status(500).json({ message: "Failed to load recommendation run history." });
+      }
+    }
+  );
+
+  router.get(
+    "/recommendations/runs/:runId",
+    authMiddlewareFn,
+    adminMiddlewareFn,
+    async (req, res) => {
+      const runId = normalizeOptionalString(req.params?.runId, 64);
+      if (!runId) {
+        return res.status(400).json({ message: "runId is required." });
+      }
+
+      try {
+        const models = getModelsFn();
+        const run = await getSimulationRunByIdFn({
+          models,
+          id: runId,
+        });
+        if (!run) {
+          return res.status(404).json({ message: "Simulation run not found." });
+        }
+        return res.json({ run });
+      } catch (err) {
+        console.error("Admin recommendation run detail failed:", err);
+        return res.status(500).json({ message: "Failed to load recommendation run detail." });
+      }
+    }
+  );
+
+  router.get(
+    "/recommendations/schema-health",
+    authMiddlewareFn,
+    adminMiddlewareFn,
+    async (_req, res) => {
+      try {
+        const models = getModelsFn();
+        const schemaHealth = await inspectFeatureSchemaHealth({ models });
+        return res.json({ schemaHealth });
+      } catch (err) {
+        console.error("Admin recommendation schema health failed:", err);
+        return res.status(500).json({ message: "Failed to load schema health diagnostics." });
       }
     }
   );

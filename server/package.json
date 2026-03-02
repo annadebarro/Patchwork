@@ -8,6 +8,7 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:status": "sequelize-cli db:migrate:status",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "db:schema:doctor": "node scripts/db-schema-doctor.js",
     "db:backup:json": "node scripts/db-backup-json.js",
     "db:restore:json": "node scripts/db-restore-json.js",
     "db:reset:safe": "node scripts/db-reset-safe.js",

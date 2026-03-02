@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const { connectToDatabase } = require("./config/db");
 const { assertNoPendingMigrations } = require("./config/migrationGuard");
 const { initModels, getModels } = require("./models");
+const { assertFeatureSchemaHealth } = require("./services/schemaDoctor");
 const { registerRoutes } = require("./routes");
 
 const PORT = process.env.PORT || 5000;
@@ -93,6 +94,13 @@ async function bootstrap() {
       console.log("[boot] Checking migrations...");
       await assertNoPendingMigrations(sequelize);
       console.log(`[boot] Migration check done in ${Date.now() - t1}ms`);
+    }
+
+    if (process.env.SKIP_SCHEMA_DOCTOR !== "true") {
+      const t2 = Date.now();
+      console.log("[boot] Verifying feature schema...");
+      await assertFeatureSchemaHealth({ models: getModels() });
+      console.log(`[boot] Schema doctor done in ${Date.now() - t2}ms`);
     }
 
     const httpServer = http.createServer(app);
