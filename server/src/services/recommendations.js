@@ -6,6 +6,7 @@ const {
   DEFAULT_RECOMMENDATION_CONFIG,
   buildUserPreferenceProfile,
   fetchCandidatePools,
+  fetchUserNoveltyExclusions,
   getEffectiveConfig,
   scoreRegularPost,
   scoreMarketPost,
@@ -91,6 +92,7 @@ async function resolveRuntimeConfig(models) {
 }
 
 async function fetchChronologicalRecommendations({ models, type, limit, offset, userId }) {
+  const runtimeConfig = await resolveRuntimeConfig(models);
   const where = { isPublic: true };
   if (type) where.type = type;
   if (userId) {
@@ -106,6 +108,17 @@ async function fetchChronologicalRecommendations({ models, type, limit, offset, 
         isSold: false,
       },
     ];
+  }
+
+  if (userId) {
+    const novelty = await fetchUserNoveltyExclusions({
+      models,
+      userId,
+      config: runtimeConfig.config,
+    });
+    if (novelty.excludedPostIds.length > 0) {
+      where.id = { [Op.notIn]: novelty.excludedPostIds };
+    }
   }
 
   const rows = await models.Post.findAll({
@@ -149,12 +162,20 @@ async function fetchHybridRecommendations({
   const runtimeConfig = await resolveRuntimeConfig(models);
 
   const profileStartMs = Date.now();
-  const profile = await buildUserPreferenceProfile({
-    models,
-    userId,
-    now,
-    config: runtimeConfig.config,
-  });
+  const [profile, novelty] = await Promise.all([
+    buildUserPreferenceProfile({
+      models,
+      userId,
+      now,
+      config: runtimeConfig.config,
+    }),
+    fetchUserNoveltyExclusions({
+      models,
+      userId,
+      now,
+      config: runtimeConfig.config,
+    }),
+  ]);
   const profileMs = Date.now() - profileStartMs;
 
   const neededWindowSize = offset + limit + 1;
@@ -170,6 +191,7 @@ async function fetchHybridRecommendations({
     type,
     limitPerType: dynamicPoolLimit,
     followedAuthorIds: [...(profile?.followedAuthorSet || [])],
+    excludePostIds: novelty.excludedPostIds,
     now,
     config: runtimeConfig.config,
   });

@@ -1,3 +1,4 @@
+const { randomUUID } = require("crypto");
 const express = require("express");
 const { Op, fn, col, literal } = require("sequelize");
 const { getModels } = require("../models");
@@ -7,8 +8,6 @@ const {
   fetchHybridRecommendations,
 } = require("../services/recommendations");
 const { logUserActionSafe } = require("../services/actionLogger");
-
-const router = express.Router();
 
 const DEFAULT_RECOMMENDED_LIMIT = 12;
 const DEFAULT_POPULAR_LIMIT = 12;
@@ -298,69 +297,80 @@ function buildPagination({ limit, offset, hasMore, nextOffset }) {
   };
 }
 
-router.get("/recommended", optionalAuthMiddleware, async (req, res) => {
-  const models = getModels();
-  const limit = clamp(toInt(req.query.limit, DEFAULT_RECOMMENDED_LIMIT), 1, MAX_LIMIT);
-  const offset = clamp(toInt(req.query.offset, 0), 0, 10000);
-  const userId = req.user?.id || null;
+function buildMarketplaceRouter({
+  getModelsFn = getModels,
+  optionalAuthMiddlewareFn = optionalAuthMiddleware,
+  fetchHybridFn = fetchHybridRecommendations,
+  fetchChronologicalFn = fetchChronologicalRecommendations,
+  logUserActionSafeFn = logUserActionSafe,
+} = {}) {
+  const router = express.Router();
 
-  try {
-    let recommendationResult;
+  router.get("/recommended", optionalAuthMiddlewareFn, async (req, res) => {
+    const models = getModelsFn();
+    const limit = clamp(toInt(req.query.limit, DEFAULT_RECOMMENDED_LIMIT), 1, MAX_LIMIT);
+    const offset = clamp(toInt(req.query.offset, 0), 0, 10000);
+    const userId = req.user?.id || null;
+    const requestId = randomUUID();
 
-    if (userId) {
-      try {
-        recommendationResult = await fetchHybridRecommendations({
+    try {
+      let recommendationResult;
+
+      if (userId) {
+        try {
+          recommendationResult = await fetchHybridFn({
+            models,
+            type: "market",
+            limit,
+            offset,
+            userId,
+          });
+        } catch (hybridErr) {
+          console.error("Marketplace recommended hybrid fetch failed, falling back:", hybridErr);
+          recommendationResult = await fetchChronologicalFn({
+            models,
+            type: "market",
+            limit,
+            offset,
+            userId,
+          });
+        }
+      } else {
+        recommendationResult = await fetchChronologicalFn({
           models,
           type: "market",
           limit,
           offset,
-          userId,
-        });
-      } catch (hybridErr) {
-        console.error("Marketplace recommended hybrid fetch failed, falling back:", hybridErr);
-        recommendationResult = await fetchChronologicalRecommendations({
-          models,
-          type: "market",
-          limit,
-          offset,
-          userId,
+          userId: null,
         });
       }
-    } else {
-      recommendationResult = await fetchChronologicalRecommendations({
-        models,
-        type: "market",
-        limit,
-        offset,
-        userId: null,
+
+      const posts = Array.isArray(recommendationResult?.posts) ? recommendationResult.posts : [];
+      const likeCountMap = await buildLikeCountMap({
+        Like: models.Like,
+        postIds: posts.map((post) => post.id),
       });
+
+      return res.json({
+        items: posts.map((post) => toListing(post, likeCountMap)),
+        algorithm: recommendationResult?.algorithm || "chronological_fallback",
+        personalized: Boolean(userId && recommendationResult?.personalized),
+        requestId,
+        pagination: buildPagination({
+          limit,
+          offset,
+          hasMore: recommendationResult?.hasMore,
+          nextOffset: recommendationResult?.nextOffset,
+        }),
+      });
+    } catch (err) {
+      console.error("Marketplace recommended fetch failed:", err);
+      return res.status(500).json({ message: "Failed to load recommended marketplace listings." });
     }
+  });
 
-    const posts = Array.isArray(recommendationResult?.posts) ? recommendationResult.posts : [];
-    const likeCountMap = await buildLikeCountMap({
-      Like: models.Like,
-      postIds: posts.map((post) => post.id),
-    });
-
-    return res.json({
-      items: posts.map((post) => toListing(post, likeCountMap)),
-      algorithm: recommendationResult?.algorithm || "chronological_fallback",
-      personalized: Boolean(userId && recommendationResult?.personalized),
-      pagination: buildPagination({
-        limit,
-        offset,
-        hasMore: recommendationResult?.hasMore,
-        nextOffset: recommendationResult?.nextOffset,
-      }),
-    });
-  } catch (err) {
-    console.error("Marketplace recommended fetch failed:", err);
-    return res.status(500).json({ message: "Failed to load recommended marketplace listings." });
-  }
-});
-
-router.get("/popular", optionalAuthMiddleware, async (req, res) => {
-  const { Post, User, Like } = getModels();
+  router.get("/popular", optionalAuthMiddlewareFn, async (req, res) => {
+    const { Post, User, Like } = getModelsFn();
   const limit = clamp(toInt(req.query.limit, DEFAULT_POPULAR_LIMIT), 1, MAX_LIMIT);
   const offset = clamp(toInt(req.query.offset, 0), 0, 10000);
   const userId = req.user?.id || null;
@@ -418,10 +428,10 @@ router.get("/popular", optionalAuthMiddleware, async (req, res) => {
     console.error("Marketplace popular fetch failed:", err);
     return res.status(500).json({ message: "Failed to load popular marketplace listings." });
   }
-});
+  });
 
-router.get("/search", optionalAuthMiddleware, async (req, res) => {
-  const { Post, User, Like } = getModels();
+  router.get("/search", optionalAuthMiddlewareFn, async (req, res) => {
+    const { Post, User, Like } = getModelsFn();
   const limit = clamp(toInt(req.query.limit, DEFAULT_SEARCH_LIMIT), 1, MAX_LIMIT);
   const offset = clamp(toInt(req.query.offset, 0), 0, 10000);
   const query = normalizeQuery(req.query.q);
@@ -537,79 +547,83 @@ router.get("/search", optionalAuthMiddleware, async (req, res) => {
     console.error("Marketplace search failed:", err);
     return res.status(500).json({ message: "Failed to search marketplace listings." });
   }
-});
+  });
 
-router.post("/analytics", optionalAuthMiddleware, async (req, res) => {
-  const rawEvents = Array.isArray(req.body?.events) ? req.body.events : [];
-  if (!rawEvents.length) {
-    return res.status(400).json({ message: "events array is required." });
-  }
-
-  if (!req.user?.id) {
-    return res.status(202).json({
-      acceptedCount: 0,
-      droppedCount: rawEvents.length,
-      anonymous: true,
-    });
-  }
-
-  const events = rawEvents.slice(0, MAX_ANALYTICS_EVENTS);
-  let acceptedCount = 0;
-  let droppedCount = rawEvents.length > MAX_ANALYTICS_EVENTS
-    ? rawEvents.length - MAX_ANALYTICS_EVENTS
-    : 0;
-
-  try {
-    for (const event of events) {
-      if (!event || typeof event !== "object" || Array.isArray(event)) {
-        droppedCount += 1;
-        continue;
-      }
-
-      const actionType = normalizeToken(event.actionType);
-      if (!actionType || !MARKETPLACE_ANALYTICS_ACTIONS.has(actionType)) {
-        droppedCount += 1;
-        continue;
-      }
-
-      const targetIdCandidate = event.targetId ?? event.postId ?? actionType;
-      const targetId = typeof targetIdCandidate === "string" && targetIdCandidate.trim()
-        ? targetIdCandidate.trim().slice(0, 120)
-        : actionType;
-
-      const metadata = event.metadata && typeof event.metadata === "object" && !Array.isArray(event.metadata)
-        ? event.metadata
-        : {};
-      const query = normalizeQuery(event.query ?? metadata.query);
-      const occurredAt = parseOccurredAt(event.occurredAt);
-
-      const wrote = await logUserActionSafe({
-        req,
-        userId: req.user.id,
-        actionType,
-        targetType: "marketplace",
-        targetId,
-        metadata: {
-          ...metadata,
-          query,
-          section: normalizeToken(event.section ?? metadata.section),
-          postId:
-            typeof (event.postId ?? metadata.postId) === "string"
-              ? String(event.postId ?? metadata.postId).trim() || null
-              : null,
-        },
-        occurredAt,
-      });
-
-      if (wrote) acceptedCount += 1;
-      else droppedCount += 1;
+  router.post("/analytics", optionalAuthMiddlewareFn, async (req, res) => {
+    const rawEvents = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!rawEvents.length) {
+      return res.status(400).json({ message: "events array is required." });
     }
 
-    return res.status(202).json({ acceptedCount, droppedCount });
-  } catch (err) {
-    console.error("Marketplace analytics logging failed:", err);
-    return res.status(500).json({ message: "Failed to store marketplace analytics events." });
-  }
-});
+    if (!req.user?.id) {
+      return res.status(202).json({
+        acceptedCount: 0,
+        droppedCount: rawEvents.length,
+        anonymous: true,
+      });
+    }
 
-module.exports = router;
+    const events = rawEvents.slice(0, MAX_ANALYTICS_EVENTS);
+    let acceptedCount = 0;
+    let droppedCount = rawEvents.length > MAX_ANALYTICS_EVENTS
+      ? rawEvents.length - MAX_ANALYTICS_EVENTS
+      : 0;
+
+    try {
+      for (const event of events) {
+        if (!event || typeof event !== "object" || Array.isArray(event)) {
+          droppedCount += 1;
+          continue;
+        }
+
+        const actionType = normalizeToken(event.actionType);
+        if (!actionType || !MARKETPLACE_ANALYTICS_ACTIONS.has(actionType)) {
+          droppedCount += 1;
+          continue;
+        }
+
+        const targetIdCandidate = event.targetId ?? event.postId ?? actionType;
+        const targetId = typeof targetIdCandidate === "string" && targetIdCandidate.trim()
+          ? targetIdCandidate.trim().slice(0, 120)
+          : actionType;
+
+        const metadata = event.metadata && typeof event.metadata === "object" && !Array.isArray(event.metadata)
+          ? event.metadata
+          : {};
+        const query = normalizeQuery(event.query ?? metadata.query);
+        const occurredAt = parseOccurredAt(event.occurredAt);
+
+        const wrote = await logUserActionSafeFn({
+          req,
+          userId: req.user.id,
+          actionType,
+          targetType: "marketplace",
+          targetId,
+          metadata: {
+            ...metadata,
+            query,
+            section: normalizeToken(event.section ?? metadata.section),
+            postId:
+              typeof (event.postId ?? metadata.postId) === "string"
+                ? String(event.postId ?? metadata.postId).trim() || null
+                : null,
+          },
+          occurredAt,
+        });
+
+        if (wrote) acceptedCount += 1;
+        else droppedCount += 1;
+      }
+
+      return res.status(202).json({ acceptedCount, droppedCount });
+    } catch (err) {
+      console.error("Marketplace analytics logging failed:", err);
+      return res.status(500).json({ message: "Failed to store marketplace analytics events." });
+    }
+  });
+
+  return router;
+}
+
+module.exports = buildMarketplaceRouter();
+module.exports.buildMarketplaceRouter = buildMarketplaceRouter;

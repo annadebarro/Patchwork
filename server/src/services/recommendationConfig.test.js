@@ -10,12 +10,26 @@ test("mergeConfig applies partial overrides while preserving required shape", ()
     regularWeights: { styleMatch: 1.7 },
     marketWeights: { categoryMatch: 1.4 },
     blend: { defaultMarketShare: 0.45 },
+    novelty: { seenCooldownDays: 3 },
   });
 
   assert.equal(merged.regularWeights.styleMatch, 1.7);
   assert.equal(merged.marketWeights.categoryMatch, 1.4);
   assert.equal(merged.blend.defaultMarketShare, 0.45);
+  assert.equal(merged.novelty.seenCooldownDays, 3);
+  assert.equal(merged.novelty.excludeCurrentLikes, DEFAULT_RECOMMENDATION_CONFIG.novelty.excludeCurrentLikes);
   assert.equal(merged.marketWeights.followAff, DEFAULT_RECOMMENDATION_CONFIG.marketWeights.followAff);
+});
+
+test("normalizeConfig backfills novelty defaults for legacy configs", () => {
+  const legacyConfig = {
+    ...DEFAULT_RECOMMENDATION_CONFIG,
+  };
+  delete legacyConfig.novelty;
+
+  const normalized = normalizeConfig(legacyConfig);
+
+  assert.deepEqual(normalized.novelty, DEFAULT_RECOMMENDATION_CONFIG.novelty);
 });
 
 test("normalizeConfig rejects invalid blend boundaries", () => {

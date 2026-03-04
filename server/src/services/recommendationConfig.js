@@ -4,6 +4,8 @@ const { randomUUID } = require("crypto");
 const { QueryTypes } = require("sequelize");
 const {
   DEFAULT_ACTION_SIGNAL_WEIGHTS,
+  DEFAULT_NOVELTY_ACTION_TYPES,
+  DEFAULT_NOVELTY_CONFIG,
   DEFAULT_RECOMMENDATION_CONFIG,
 } = require("./recommendationEngine");
 
@@ -114,6 +116,55 @@ function normalizeDiversityCaps(raw) {
   return caps;
 }
 
+function normalizeOptionalBoolean(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeNovelty(raw) {
+  if (raw === undefined) {
+    return { ...DEFAULT_NOVELTY_CONFIG, seenActionTypes: [...DEFAULT_NOVELTY_ACTION_TYPES] };
+  }
+
+  const obj = asObject(raw, "novelty");
+  const actionTypes = Array.isArray(obj.seenActionTypes)
+    ? [
+        ...new Set(
+          obj.seenActionTypes
+            .filter((value) => typeof value === "string" && value.trim())
+            .map((value) => value.trim().toLowerCase())
+        ),
+      ]
+    : [...DEFAULT_NOVELTY_ACTION_TYPES];
+
+  if (actionTypes.length === 0) {
+    throw new Error("novelty.seenActionTypes must be a non-empty array of strings.");
+  }
+
+  return {
+    excludeCurrentLikes: normalizeOptionalBoolean(
+      obj.excludeCurrentLikes,
+      DEFAULT_NOVELTY_CONFIG.excludeCurrentLikes
+    ),
+    excludeCurrentPatches: normalizeOptionalBoolean(
+      obj.excludeCurrentPatches,
+      DEFAULT_NOVELTY_CONFIG.excludeCurrentPatches
+    ),
+    seenCooldownDays: assertFiniteInt(
+      obj.seenCooldownDays ?? DEFAULT_NOVELTY_CONFIG.seenCooldownDays,
+      "novelty.seenCooldownDays",
+      0,
+      3650
+    ),
+    maxSeenPostIds: assertFiniteInt(
+      obj.maxSeenPostIds ?? DEFAULT_NOVELTY_CONFIG.maxSeenPostIds,
+      "novelty.maxSeenPostIds",
+      0,
+      10000
+    ),
+    seenActionTypes: actionTypes,
+  };
+}
+
 function normalizeConfig(configInput) {
   const raw = asObject(configInput, "config");
 
@@ -171,6 +222,7 @@ function normalizeConfig(configInput) {
         3650
       ),
     },
+    novelty: normalizeNovelty(raw.novelty),
     actionSignalWeights: normalizeWeightMap(raw.actionSignalWeights, ACTION_WEIGHT_KEYS, "actionSignalWeights"),
   };
 
@@ -224,6 +276,12 @@ function mergeConfig(baseConfig, overrides = {}) {
       ...(base.pools || {}),
       ...((patch.pools && typeof patch.pools === "object" && !Array.isArray(patch.pools))
         ? patch.pools
+        : {}),
+    },
+    novelty: {
+      ...(base.novelty || {}),
+      ...((patch.novelty && typeof patch.novelty === "object" && !Array.isArray(patch.novelty))
+        ? patch.novelty
         : {}),
     },
     actionSignalWeights: {

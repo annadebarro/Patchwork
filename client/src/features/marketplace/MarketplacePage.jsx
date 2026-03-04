@@ -17,6 +17,7 @@ const CAROUSEL_LIMIT = 12;
 const SEARCH_LIMIT = 24;
 const MAX_QUERY_LENGTH = 80;
 const MARKETPLACE_CAROUSEL_STATE_KEY_PREFIX = "marketplace:carousel-page:";
+const RECOMMENDATION_VISIBILITY_THRESHOLD = 0.5;
 
 function formatPrice(priceCents) {
   if (!Number.isFinite(priceCents)) return "Price unavailable";
@@ -27,6 +28,13 @@ function formatLikes(likeCount) {
   const value = Number.isFinite(likeCount) ? likeCount : 0;
   if (value === 1) return "1 like";
   return `${value} likes`;
+}
+
+function normalizeRankPosition(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.trunc(parsed);
+  return normalized > 0 ? normalized : null;
 }
 
 function mapListingTitle(item) {
@@ -110,17 +118,83 @@ function setStoredCarouselPage(sectionKey, pageIndex) {
   }
 }
 
-function MarketplaceListingCard({ item, section, onOpen }) {
+function MarketplaceListingCard({
+  item,
+  section,
+  rankPosition = null,
+  recommendationFeedContext = null,
+  onRecommendationImpression,
+  onOpen,
+}) {
   const primaryImage = Array.isArray(item?.imageUrls) && item.imageUrls.length > 0
     ? item.imageUrls[0]
     : item?.imageUrl || "";
   const sellerName = item?.seller?.username || item?.seller?.name || "Unknown seller";
+  const cardRef = useRef(null);
+  const hasTrackedRecommendationImpressionRef = useRef(false);
+
+  useEffect(() => {
+    hasTrackedRecommendationImpressionRef.current = false;
+  }, [item?.id, recommendationFeedContext?.requestId]);
+
+  useEffect(() => {
+    if (
+      section !== "recommended" ||
+      !recommendationFeedContext?.requestId ||
+      typeof onRecommendationImpression !== "function"
+    ) {
+      return undefined;
+    }
+
+    const element = cardRef.current;
+    if (!element || typeof IntersectionObserver !== "function") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (
+          !entry ||
+          !entry.isIntersecting ||
+          entry.intersectionRatio < RECOMMENDATION_VISIBILITY_THRESHOLD ||
+          hasTrackedRecommendationImpressionRef.current
+        ) {
+          return;
+        }
+
+        hasTrackedRecommendationImpressionRef.current = true;
+        onRecommendationImpression({
+          postId: item.id,
+          rankPosition,
+          algorithm: recommendationFeedContext.algorithm,
+          requestId: recommendationFeedContext.requestId,
+        });
+      },
+      { threshold: [RECOMMENDATION_VISIBILITY_THRESHOLD] }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [
+    item.id,
+    onRecommendationImpression,
+    rankPosition,
+    recommendationFeedContext?.algorithm,
+    recommendationFeedContext?.requestId,
+    section,
+  ]);
 
   return (
     <button
+      ref={cardRef}
       type="button"
       className="marketplace-card"
-      onClick={() => onOpen(item, section)}
+      onClick={() =>
+        onOpen(item, section, {
+          rankPosition,
+          feedContext: recommendationFeedContext,
+        })
+      }
     >
       <div className="marketplace-card-image-wrap">
         {primaryImage ? (
@@ -140,7 +214,17 @@ function MarketplaceListingCard({ item, section, onOpen }) {
   );
 }
 
-function MarketplaceCarousel({ title, sectionKey, items, loading, error, onMove, onOpenItem }) {
+function MarketplaceCarousel({
+  title,
+  sectionKey,
+  items,
+  loading,
+  error,
+  recommendationFeedContext = null,
+  onRecommendationImpression,
+  onMove,
+  onOpenItem,
+}) {
   const [cardsPerPage, setCardsPerPage] = useState(() =>
     getCardsPerPage(typeof window === "undefined" ? 1200 : window.innerWidth)
   );
@@ -227,9 +311,18 @@ function MarketplaceCarousel({ title, sectionKey, items, loading, error, onMove,
           className="marketplace-carousel-track"
           style={{ "--marketplace-cards-per-page": cardsPerPage }}
         >
-          {visibleItems.map((item) => (
+          {visibleItems.map((item, index) => (
             <div key={item.id} className="marketplace-carousel-slide">
-              <MarketplaceListingCard item={item} section={sectionKey} onOpen={onOpenItem} />
+              <MarketplaceListingCard
+                item={item}
+                section={sectionKey}
+                rankPosition={startIndex + index + 1}
+                recommendationFeedContext={
+                  sectionKey === "recommended" ? recommendationFeedContext : null
+                }
+                onRecommendationImpression={onRecommendationImpression}
+                onOpen={onOpenItem}
+              />
             </div>
           ))}
         </div>
@@ -247,6 +340,8 @@ function MarketplacePage() {
     items: [],
     loading: true,
     error: "",
+    algorithm: "chronological_fallback",
+    requestId: null,
   });
   const [popularState, setPopularState] = useState({
     items: [],
@@ -270,6 +365,7 @@ function MarketplacePage() {
     conditions: [UNKNOWN],
   });
   const lastSearchAnalyticsKeyRef = useRef("");
+  const recommendationImpressionKeysRef = useRef(new Set());
 
   const hasActiveFilters = useMemo(
     () =>
@@ -286,6 +382,78 @@ function MarketplacePage() {
   const trackEvent = useCallback((payload, options) => {
     void trackMarketplaceEvent(buildMarketplaceAnalyticsEvent(payload), options);
   }, []);
+
+  const sendRecommendationTelemetryEvents = useCallback((events, { keepalive = false } = {}) => {
+    if (!Array.isArray(events) || !events.length) return;
+
+    void apiFetch("/recommendations/telemetry", {
+      method: "POST",
+      auth: true,
+      surface: REQUEST_SURFACES.MARKETPLACE,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ events }),
+      keepalive,
+    }).catch(() => {
+      // best effort recommendation telemetry
+    });
+  }, []);
+
+  const buildRecommendationFeedEvent = useCallback(({
+    actionType,
+    postId,
+    rankPosition,
+    algorithm,
+    requestId,
+    occurredAt = new Date(),
+  }) => ({
+    actionType,
+    postId,
+    feedType: "market",
+    rankPosition: normalizeRankPosition(rankPosition),
+    algorithm: typeof algorithm === "string" ? algorithm : null,
+    requestId: typeof requestId === "string" ? requestId : null,
+    occurredAt: occurredAt.toISOString(),
+  }), []);
+
+  const handleRecommendedFeedImpression = useCallback(({
+    postId,
+    rankPosition,
+    algorithm,
+    requestId,
+  }) => {
+    if (!postId || typeof requestId !== "string" || !requestId) return;
+
+    const dedupeKey = `${requestId}:${postId}`;
+    if (recommendationImpressionKeysRef.current.has(dedupeKey)) {
+      return;
+    }
+    recommendationImpressionKeysRef.current.add(dedupeKey);
+
+    sendRecommendationTelemetryEvents([
+      buildRecommendationFeedEvent({
+        actionType: "feed_impression",
+        postId,
+        rankPosition,
+        algorithm,
+        requestId,
+      }),
+    ]);
+  }, [buildRecommendationFeedEvent, sendRecommendationTelemetryEvents]);
+
+  useEffect(() => {
+    recommendationImpressionKeysRef.current = new Set();
+  }, [recommendedState.requestId]);
+
+  const recommendedFeedContext = useMemo(() => (
+    recommendedState.requestId
+      ? {
+          algorithm: recommendedState.algorithm,
+          requestId: recommendedState.requestId,
+        }
+      : null
+  ), [recommendedState.algorithm, recommendedState.requestId]);
 
   const fetchSearchResults = useCallback(
     async ({ query, activeFilters }) => {
@@ -453,12 +621,19 @@ function MarketplacePage() {
             items: Array.isArray(recommendedData?.items) ? recommendedData.items : [],
             loading: false,
             error: "",
+            algorithm:
+              typeof recommendedData?.algorithm === "string"
+                ? recommendedData.algorithm
+                : "chronological_fallback",
+            requestId: typeof recommendedData?.requestId === "string" ? recommendedData.requestId : null,
           });
         } else {
           setRecommendedState({
             items: [],
             loading: false,
             error: recommendedData?.message || "Failed to load recommended listings.",
+            algorithm: "chronological_fallback",
+            requestId: null,
           });
         }
 
@@ -481,6 +656,7 @@ function MarketplacePage() {
           ...prev,
           loading: false,
           error: prev.error || "Failed to load listings.",
+          requestId: null,
         }));
         setPopularState((prev) => ({
           ...prev,
@@ -550,7 +726,10 @@ function MarketplacePage() {
     });
   }
 
-  function handleOpenItem(item, section) {
+  function handleOpenItem(item, section, options = {}) {
+    const rankPosition = normalizeRankPosition(options?.rankPosition);
+    const feedContext = options?.feedContext;
+
     trackEvent(
       {
         actionType: "marketplace_item_click",
@@ -565,7 +744,35 @@ function MarketplacePage() {
       { keepalive: true }
     );
 
-    navigate(`/post/${item.id}`);
+    if (section === "recommended" && feedContext?.requestId) {
+      sendRecommendationTelemetryEvents(
+        [
+          buildRecommendationFeedEvent({
+            actionType: "feed_click",
+            postId: item.id,
+            rankPosition,
+            algorithm: feedContext.algorithm,
+            requestId: feedContext.requestId,
+          }),
+        ],
+        { keepalive: true }
+      );
+    }
+
+    navigate(`/post/${item.id}`, {
+      state:
+        section === "recommended" && feedContext?.requestId
+          ? {
+              feedTelemetry: {
+                postId: item.id,
+                feedType: "market",
+                rankPosition,
+                algorithm: feedContext.algorithm,
+                requestId: feedContext.requestId,
+              },
+            }
+          : undefined,
+    });
   }
 
   function updateFilter(key, value) {
@@ -715,6 +922,8 @@ function MarketplacePage() {
             items={recommendedState.items}
             loading={recommendedState.loading}
             error={recommendedState.error}
+            recommendationFeedContext={recommendedFeedContext}
+            onRecommendationImpression={handleRecommendedFeedImpression}
             onMove={handleCarouselMove}
             onOpenItem={handleOpenItem}
           />
@@ -724,6 +933,8 @@ function MarketplacePage() {
             items={popularState.items}
             loading={popularState.loading}
             error={popularState.error}
+            recommendationFeedContext={null}
+            onRecommendationImpression={null}
             onMove={handleCarouselMove}
             onOpenItem={handleOpenItem}
           />

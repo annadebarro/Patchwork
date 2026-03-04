@@ -8,6 +8,7 @@ const {
   buildUserPreferenceProfile,
   blendAndDiversify,
   fetchCandidatePools,
+  fetchUserNoveltyExclusions,
   filterUuidLike,
   scoreMarketPost,
   scoreRegularPost,
@@ -151,6 +152,53 @@ test("fetchCandidatePools applies own-post and sold filters", async () => {
   assert.equal(result.marketCandidates.length, 1);
   assert.equal(result.regularCandidates[0]._engagementVelocity, 0);
   assert.equal(result.marketCandidates[0]._engagementVelocity, 0);
+});
+
+test("fetchCandidatePools excludes novelty-suppressed post IDs", async () => {
+  const calls = [];
+  const excludedPostId = "11111111-1111-4111-8111-111111111111";
+  const makePost = (id, type, authorId) => ({
+    toJSON: () => ({
+      id,
+      type,
+      author: { id: authorId },
+      createdAt: new Date().toISOString(),
+      styleTags: [],
+      colorTags: [],
+      brand: "",
+      category: "unknown",
+      condition: "unknown",
+      sizeLabel: "unknown",
+      priceCents: null,
+    }),
+  });
+
+  const models = {
+    User: {},
+    Post: {
+      sequelize: {
+        query: async () => [],
+      },
+      findAll: async ({ where }) => {
+        calls.push(where);
+        return [makePost("22222222-2222-4222-8222-222222222222", where.type, "author-1")];
+      },
+    },
+  };
+
+  await fetchCandidatePools({
+    models,
+    userId: "viewer-1",
+    type: null,
+    limitPerType: 5,
+    excludePostIds: [excludedPostId],
+    now: new Date(),
+  });
+
+  assert.equal(calls.length, 2);
+  for (const where of calls) {
+    assert.deepEqual(where.id[Op.notIn], [excludedPostId]);
+  }
 });
 
 test("fetchCandidatePools boosts followed authors into candidate pool", async () => {
@@ -306,4 +354,47 @@ test("buildUserPreferenceProfile ignores invalid post IDs in action history", as
   });
 
   assert.deepEqual(capturedWhere.id[Op.in], [validPostId]);
+});
+
+test("fetchUserNoveltyExclusions merges likes, patches, and recent seen posts", async () => {
+  const userId = "viewer-1";
+  const likedPostId = "11111111-1111-4111-8111-111111111111";
+  const patchedPostId = "22222222-2222-4222-8222-222222222222";
+  const seenPostId = "33333333-3333-4333-8333-333333333333";
+  let capturedSeenQuery = null;
+
+  const models = {
+    Like: {
+      findAll: async ({ where }) => {
+        assert.equal(where.userId, userId);
+        return [{ postId: likedPostId }];
+      },
+    },
+    Patch: {
+      findAll: async ({ where }) => {
+        assert.equal(where.userId, userId);
+        return [{ postId: patchedPostId }];
+      },
+    },
+    UserAction: {
+      sequelize: {
+        query: async (_sql, options) => {
+          capturedSeenQuery = options.replacements;
+          return [{ postId: seenPostId }];
+        },
+      },
+    },
+  };
+
+  const result = await fetchUserNoveltyExclusions({
+    models,
+    userId,
+    now: new Date("2026-03-02T00:00:00.000Z"),
+  });
+
+  assert.deepEqual(capturedSeenQuery.actionTypes, ["feed_impression", "feed_click", "feed_dwell"]);
+  assert.deepEqual(result.likedPostIds, [likedPostId]);
+  assert.deepEqual(result.patchedPostIds, [patchedPostId]);
+  assert.deepEqual(result.seenPostIds, [seenPostId]);
+  assert.deepEqual(result.excludedPostIds.sort(), [likedPostId, patchedPostId, seenPostId].sort());
 });
