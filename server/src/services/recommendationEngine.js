@@ -18,6 +18,20 @@ const DEFAULT_ACTION_SIGNAL_WEIGHTS = Object.freeze({
   feed_dwell: 0.25,
 });
 
+const DEFAULT_NOVELTY_ACTION_TYPES = Object.freeze([
+  "feed_impression",
+  "feed_click",
+  "feed_dwell",
+]);
+
+const DEFAULT_NOVELTY_CONFIG = Object.freeze({
+  excludeCurrentLikes: true,
+  excludeCurrentPatches: true,
+  seenCooldownDays: 7,
+  maxSeenPostIds: 1000,
+  seenActionTypes: DEFAULT_NOVELTY_ACTION_TYPES,
+});
+
 const DEFAULT_RECOMMENDATION_CONFIG = Object.freeze({
   version: "hybrid_v1",
   regularWeights: Object.freeze({
@@ -61,6 +75,7 @@ const DEFAULT_RECOMMENDATION_CONFIG = Object.freeze({
     engagementWindowDays: 30,
     preferenceWindowDays: 90,
   }),
+  novelty: DEFAULT_NOVELTY_CONFIG,
   actionSignalWeights: DEFAULT_ACTION_SIGNAL_WEIGHTS,
 });
 const ACTION_SIGNAL_WEIGHTS = DEFAULT_ACTION_SIGNAL_WEIGHTS;
@@ -77,6 +92,20 @@ function clamp(value, min, max) {
 
 function getEffectiveConfig(config) {
   const raw = config && typeof config === "object" ? config : {};
+
+  const noveltyRaw =
+    raw.novelty && typeof raw.novelty === "object" && !Array.isArray(raw.novelty)
+      ? raw.novelty
+      : {};
+  const noveltyActionTypes = Array.isArray(noveltyRaw.seenActionTypes)
+    ? [
+        ...new Set(
+          noveltyRaw.seenActionTypes
+            .filter((value) => typeof value === "string" && value.trim())
+            .map((value) => value.trim().toLowerCase())
+        ),
+      ]
+    : [...DEFAULT_NOVELTY_ACTION_TYPES];
 
   const merged = {
     ...DEFAULT_RECOMMENDATION_CONFIG,
@@ -99,6 +128,11 @@ function getEffectiveConfig(config) {
     pools: {
       ...DEFAULT_RECOMMENDATION_CONFIG.pools,
       ...(raw.pools || {}),
+    },
+    novelty: {
+      ...DEFAULT_RECOMMENDATION_CONFIG.novelty,
+      ...noveltyRaw,
+      seenActionTypes: noveltyActionTypes.length > 0 ? noveltyActionTypes : [...DEFAULT_NOVELTY_ACTION_TYPES],
     },
     actionSignalWeights: {
       ...DEFAULT_RECOMMENDATION_CONFIG.actionSignalWeights,
@@ -635,6 +669,7 @@ async function fetchCandidatePools({
   type,
   limitPerType,
   followedAuthorIds,
+  excludePostIds,
   now = new Date(),
   config,
 } = {}) {
@@ -645,6 +680,7 @@ async function fetchCandidatePools({
     1,
     Number(limitPerType) || Number(poolConfig.defaultLimitPerType) || DEFAULT_LIMIT_PER_TYPE
   );
+  const excludedIds = filterUuidLike(excludePostIds);
 
   const regularWhere = {
     isPublic: true,
@@ -664,6 +700,11 @@ async function fetchCandidatePools({
       [Op.gte]: new Date(now.getTime() - poolConfig.marketRecencyDays * 24 * 60 * 60 * 1000),
     },
   };
+
+  if (excludedIds.length > 0) {
+    regularWhere.id = { [Op.notIn]: excludedIds };
+    marketWhere.id = { [Op.notIn]: excludedIds };
+  }
 
   const include = [
     {
@@ -776,6 +817,94 @@ async function fetchCandidatePools({
   return {
     regularCandidates,
     marketCandidates,
+  };
+}
+
+async function fetchUserNoveltyExclusions({ models, userId, now = new Date(), config } = {}) {
+  const effectiveConfig = getEffectiveConfig(config);
+  const noveltyConfig = effectiveConfig.novelty || DEFAULT_NOVELTY_CONFIG;
+  if (!userId) {
+    return {
+      likedPostIdSet: new Set(),
+      patchedPostIdSet: new Set(),
+      seenPostIdSet: new Set(),
+      excludedPostIdSet: new Set(),
+      likedPostIds: [],
+      patchedPostIds: [],
+      seenPostIds: [],
+      excludedPostIds: [],
+    };
+  }
+
+  const [likeRows, patchRows, seenRows] = await Promise.all([
+    noveltyConfig.excludeCurrentLikes && models?.Like?.findAll
+      ? models.Like.findAll({
+          where: { userId },
+          attributes: ["postId"],
+          raw: true,
+        })
+      : Promise.resolve([]),
+    noveltyConfig.excludeCurrentPatches && models?.Patch?.findAll
+      ? models.Patch.findAll({
+          where: { userId },
+          attributes: ["postId"],
+          raw: true,
+        })
+      : Promise.resolve([]),
+    noveltyConfig.maxSeenPostIds > 0 &&
+    Array.isArray(noveltyConfig.seenActionTypes) &&
+    noveltyConfig.seenActionTypes.length > 0 &&
+    models?.UserAction?.sequelize
+      ? models.UserAction.sequelize.query(
+          `
+            SELECT
+              target_id AS "postId",
+              MAX(occurred_at) AS "lastOccurredAt"
+            FROM user_actions
+            WHERE user_id = :userId
+              AND target_type = 'post'
+              AND action_type IN (:actionTypes)
+              AND occurred_at >= :since
+            GROUP BY target_id
+            ORDER BY MAX(occurred_at) DESC
+            LIMIT :limit;
+          `,
+          {
+            type: QueryTypes.SELECT,
+            replacements: {
+              userId,
+              actionTypes: noveltyConfig.seenActionTypes,
+              since: new Date(
+                now.getTime() - noveltyConfig.seenCooldownDays * 24 * 60 * 60 * 1000
+              ),
+              limit: noveltyConfig.maxSeenPostIds,
+            },
+          }
+        )
+      : Promise.resolve([]),
+  ]);
+
+  const likedPostIds = filterUuidLike((likeRows || []).map((row) => row.postId));
+  const patchedPostIds = filterUuidLike((patchRows || []).map((row) => row.postId));
+  const seenPostIds = filterUuidLike((seenRows || []).map((row) => row.postId)).slice(
+    0,
+    noveltyConfig.maxSeenPostIds
+  );
+
+  const likedPostIdSet = new Set(likedPostIds);
+  const patchedPostIdSet = new Set(patchedPostIds);
+  const seenPostIdSet = new Set(seenPostIds);
+  const excludedPostIdSet = new Set([...likedPostIdSet, ...patchedPostIdSet, ...seenPostIdSet]);
+
+  return {
+    likedPostIdSet,
+    patchedPostIdSet,
+    seenPostIdSet,
+    excludedPostIdSet,
+    likedPostIds,
+    patchedPostIds,
+    seenPostIds,
+    excludedPostIds: [...excludedPostIdSet],
   };
 }
 
@@ -979,6 +1108,8 @@ async function buildUserPreferenceProfile({ models, userId, now = new Date(), co
 module.exports = {
   ACTION_SIGNAL_WEIGHTS,
   DEFAULT_ACTION_SIGNAL_WEIGHTS,
+  DEFAULT_NOVELTY_ACTION_TYPES,
+  DEFAULT_NOVELTY_CONFIG,
   DEFAULT_LIMIT_PER_TYPE,
   DEFAULT_MARKET_SHARE,
   DEFAULT_RECOMMENDATION_CONFIG,
@@ -986,6 +1117,7 @@ module.exports = {
   buildUserPreferenceProfile,
   blendAndDiversify,
   fetchCandidatePools,
+  fetchUserNoveltyExclusions,
   filterUuidLike,
   getEffectiveConfig,
   isUuidLike,
