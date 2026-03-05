@@ -1866,6 +1866,31 @@ button:disabled {
   padding: 24px;
 }
 
+/* Post Detail Modal Overlay (Home background route) */
+.post-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 18, 30, 0.62);
+  z-index: 110;
+  overflow-y: auto;
+  padding: 24px 24px 24px 94px;
+}
+
+.post-detail-overlay .feed-content {
+  min-height: calc(100vh - 48px);
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.post-detail-overlay .post-detail {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 0;
+}
+
 .create-post-modal {
   width: min(520px, 100%);
   background: var(--paper);
@@ -3998,6 +4023,14 @@ button:disabled {
     justify-self: start;
   }
 
+  .post-detail-overlay {
+    padding: 18px;
+  }
+
+  .post-detail-overlay .feed-content {
+    min-height: calc(100vh - 36px);
+  }
+
 }
 
 @media (max-width: 600px) {
@@ -4071,6 +4104,14 @@ button:disabled {
 
   .notif-panel {
     width: 280px;
+  }
+
+  .post-detail-overlay {
+    padding: 12px;
+  }
+
+  .post-detail-overlay .feed-content {
+    min-height: calc(100vh - 24px);
   }
 }
 

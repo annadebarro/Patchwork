@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import ImageCarousel from "../../shared/ui/ImageCarousel";
 
 const VISIBILITY_THRESHOLD = 0.5;
@@ -24,6 +24,7 @@ function PostCard({
   onFeedDwell,
   onFeedClick,
 }) {
+  const location = useLocation();
   const navigate = useNavigate();
   const cardRef = useRef(null);
   const hasLoggedImpressionRef = useRef(false);
@@ -107,17 +108,21 @@ function PostCard({
       });
     }
 
-    navigate(`/post/${post.id}`, {
-      state: {
-        feedTelemetry: {
-          postId: post.id,
-          feedType: typeof feedContext?.feedType === "string" ? feedContext.feedType : null,
-          rankPosition,
-          algorithm: typeof feedContext?.algorithm === "string" ? feedContext.algorithm : null,
-          requestId: typeof feedContext?.requestId === "string" ? feedContext.requestId : null,
-        },
+    const navigationState = {
+      feedTelemetry: {
+        postId: post.id,
+        feedType: typeof feedContext?.feedType === "string" ? feedContext.feedType : null,
+        rankPosition,
+        algorithm: typeof feedContext?.algorithm === "string" ? feedContext.algorithm : null,
+        requestId: typeof feedContext?.requestId === "string" ? feedContext.requestId : null,
       },
-    });
+    };
+
+    if (location.pathname === "/home") {
+      navigationState.backgroundLocation = location;
+    }
+
+    navigate(`/post/${post.id}`, { state: navigationState });
   }
 
   if (imageOnly) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { matchPath, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import "./App.css";
 import { API_BASE_URL, parseApiResponse } from "./shared/api/http";
 import RequireAuth from "./shared/ui/RequireAuth";
@@ -36,6 +36,14 @@ function App() {
 
   const forceLoading = location.search.includes("loading=1") || location.search.includes("loading=2");
   const showNeedleLoader = location.search.includes("loading=2");
+  const isPostDetailRoute = Boolean(matchPath("/post/:postId", location.pathname));
+  const locationState = location.state && typeof location.state === "object" ? location.state : null;
+  const backgroundLocationCandidate = locationState?.backgroundLocation;
+  const homeBackgroundLocation = isPostDetailRoute && backgroundLocationCandidate?.pathname === "/home"
+    ? backgroundLocationCandidate
+    : null;
+  const displayedLocation = homeBackgroundLocation || location;
+  const displayedPathname = displayedLocation.pathname;
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -79,7 +87,7 @@ function App() {
     setRouteLoading(true);
     const timeout = setTimeout(() => setRouteLoading(false), 300);
     return () => clearTimeout(timeout);
-  }, [location.pathname]);
+  }, [displayedPathname]);
 
   async function handleSignup(event) {
     event.preventDefault();
@@ -274,7 +282,7 @@ function App() {
 
   return (
     <main className={`shell ${shellClassName}`}>
-      <Routes>
+      <Routes location={displayedLocation}>
         <Route
           path="/"
           element={
@@ -367,6 +375,19 @@ function App() {
         </Route>
         <Route path="*" element={<Navigate to={user ? "/home" : "/"} replace />} />
       </Routes>
+
+      {homeBackgroundLocation && (
+        <Routes>
+          <Route
+            path="/post/:postId"
+            element={(
+              <div className="post-detail-overlay" role="dialog" aria-modal="true">
+                <PostDetailPage currentUser={user} />
+              </div>
+            )}
+          />
+        </Routes>
+      )}
 
       {shouldRenderPrompt && (
         <OnboardingPrompt
