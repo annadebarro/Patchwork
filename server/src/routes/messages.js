@@ -100,9 +100,15 @@ router.post("/conversations", authMiddleware, async (req, res) => {
           if (totalCount === 2) {
             // Don't reuse a completed deal conversation — create a new one instead
             const candidate = await Conversation.findByPk(convId, {
-              attributes: ["id", "dealStatus"],
+              attributes: ["id", "dealStatus", "linkedPostId"],
             });
             if (candidate?.dealStatus === "completed") continue;
+
+            // If a postId is provided, only reuse a conversation linked to that same post
+            if (postId && candidate?.linkedPostId !== postId) continue;
+
+            // If no postId, only reuse a conversation that isn't linked to a post
+            if (!postId && candidate?.linkedPostId) continue;
 
             const existing = await Conversation.findByPk(convId, {
               include: [
