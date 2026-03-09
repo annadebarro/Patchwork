@@ -85,6 +85,38 @@ const COLD_START_ACTION_THRESHOLD = 8;
 const FULL_HISTORY_ACTION_THRESHOLD = 28;
 const FOLLOWED_AUTHOR_CANDIDATE_LIMIT = 150;
 const MAX_FOLLOWED_AUTHOR_IDS = 300;
+const ONBOARDING_SIZE_CATEGORY_KEYS = Object.freeze([
+  "tops",
+  "bottoms",
+  "dresses",
+  "outerwear",
+  "shoes",
+]);
+const DIRECT_APPAREL_SIZE_LABELS = new Set([
+  "one_size",
+  "xxs",
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "xxxl",
+]);
+const NUMERIC_APPAREL_SIZE_SUFFIXES = new Set([
+  "00",
+  "0",
+  "2",
+  "4",
+  "6",
+  "8",
+  "10",
+  "12",
+  "14",
+  "16",
+  "18",
+]);
+const SHOE_SIZE_SUFFIXES = new Set(["5", "6", "7", "8", "9", "10", "11", "12", "13"]);
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -351,6 +383,105 @@ function averageTagAffinity(tags, affinityMap) {
 function getMapValue(map, key) {
   if (!key) return 0;
   return clamp(map.get(key) || 0, 0, 1);
+}
+
+function normalizeOnboardingSizeLabel(categoryKey, rawLabel) {
+  if (typeof rawLabel !== "string") return null;
+
+  const trimmed = rawLabel.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.replace(/[\s-]+/g, "_");
+  if (categoryKey === "shoes") {
+    if (normalized.startsWith("shoe_")) {
+      const suffix = normalized.slice("shoe_".length);
+      return SHOE_SIZE_SUFFIXES.has(suffix) ? normalized : null;
+    }
+
+    const numericCandidate = trimmed.replace(/\s+/g, "");
+    if (SHOE_SIZE_SUFFIXES.has(numericCandidate)) {
+      return `shoe_${numericCandidate}`;
+    }
+
+    return null;
+  }
+
+  if (DIRECT_APPAREL_SIZE_LABELS.has(normalized)) {
+    return normalized;
+  }
+
+  if (normalized.startsWith("numeric_")) {
+    const suffix = normalized.slice("numeric_".length);
+    return NUMERIC_APPAREL_SIZE_SUFFIXES.has(suffix) ? normalized : null;
+  }
+
+  const numericCandidate = trimmed.replace(/\s+/g, "");
+  if (NUMERIC_APPAREL_SIZE_SUFFIXES.has(numericCandidate)) {
+    return `numeric_${numericCandidate}`;
+  }
+
+  return null;
+}
+
+function buildSeedAffinityMap(tokens) {
+  return new Map(
+    [...new Set((tokens || []).filter((token) => typeof token === "string" && token))]
+      .sort()
+      .map((token) => [token, 1])
+  );
+}
+
+function buildOnboardingPreferenceSeeds(userRecord) {
+  const favoriteBrands = Array.isArray(userRecord?.favoriteBrands) ? userRecord.favoriteBrands : [];
+  const sizePreferences =
+    userRecord?.sizePreferences && typeof userRecord.sizePreferences === "object" && !Array.isArray(userRecord.sizePreferences)
+      ? userRecord.sizePreferences
+      : {};
+
+  const brandTokens = favoriteBrands
+    .map((brand) => normalizeToken(brand))
+    .filter(Boolean);
+
+  const sizeTokens = new Set();
+  const categoryTokens = new Set();
+
+  for (const categoryKey of ONBOARDING_SIZE_CATEGORY_KEYS) {
+    const entries = Array.isArray(sizePreferences[categoryKey]) ? sizePreferences[categoryKey] : [];
+    let categoryHasRecognizedSize = false;
+
+    for (const entry of entries) {
+      const normalizedSize = normalizeOnboardingSizeLabel(categoryKey, entry?.label);
+      if (!normalizedSize) continue;
+      sizeTokens.add(normalizedSize);
+      categoryHasRecognizedSize = true;
+    }
+
+    if (categoryHasRecognizedSize) {
+      categoryTokens.add(categoryKey);
+    }
+  }
+
+  return {
+    brandAffinity: buildSeedAffinityMap(brandTokens),
+    sizeAffinity: buildSeedAffinityMap([...sizeTokens]),
+    categoryAffinity: buildSeedAffinityMap([...categoryTokens]),
+    onboardingBrandCount: new Set(brandTokens).size,
+    onboardingRecognizedSizeCount: sizeTokens.size,
+    onboardingCategorySeedCount: categoryTokens.size,
+  };
+}
+
+function mergeAffinityMapWithSeed(baseMap, seedMap, seedBlend) {
+  const merged = new Map(baseMap instanceof Map ? baseMap : []);
+  const effectiveSeedBlend = clamp(Number(seedBlend) || 0, 0, 1);
+
+  for (const [key, value] of seedMap instanceof Map ? seedMap.entries() : []) {
+    const seededValue = clamp(Number(value) || 0, 0, 1) * effectiveSeedBlend;
+    if (seededValue <= 0) continue;
+    merged.set(key, Math.max(merged.get(key) || 0, seededValue));
+  }
+
+  return merged;
 }
 
 function buildAuthorCap(position, diversityCaps) {
@@ -915,7 +1046,13 @@ async function buildUserPreferenceProfile({ models, userId, now = new Date(), co
   const blendConfig = effectiveConfig.blend;
   const since = new Date(now.getTime() - preferenceWindowDays * 24 * 60 * 60 * 1000);
 
-  const [followRows, actionRows] = await Promise.all([
+  const [userRecord, followRows, actionRows] = await Promise.all([
+    models?.User?.findByPk && userId
+      ? models.User.findByPk(userId, {
+          attributes: ["favoriteBrands", "sizePreferences"],
+          raw: true,
+        })
+      : Promise.resolve(null),
     models.Follow.findAll({
       where: { followerId: userId },
       attributes: ["followeeId"],
@@ -1066,22 +1203,40 @@ async function buildUserPreferenceProfile({ models, userId, now = new Date(), co
   const sizeAffinity = normalizeAffinityMap(sizeRaw);
   const priceBandAffinity = normalizeAffinityMap(priceBandRaw);
   const conditionAffinity = normalizeAffinityMap(conditionRaw);
+  const historyConfidence = getHistoryConfidence({ relevantActionCount });
+  const onboardingSeedBlend = clamp(1 - historyConfidence, 0.15, 1);
+  const onboardingSeeds = buildOnboardingPreferenceSeeds(userRecord);
+  const seededCategoryAffinity = mergeAffinityMapWithSeed(
+    categoryAffinity,
+    onboardingSeeds.categoryAffinity,
+    onboardingSeedBlend
+  );
+  const seededBrandAffinity = mergeAffinityMapWithSeed(
+    brandAffinity,
+    onboardingSeeds.brandAffinity,
+    onboardingSeedBlend
+  );
+  const seededSizeAffinity = mergeAffinityMapWithSeed(
+    sizeAffinity,
+    onboardingSeeds.sizeAffinity,
+    onboardingSeedBlend
+  );
 
   const regularSignalStrength = clamp(
     getMapStrength(styleAffinity) * 0.35 +
       getMapStrength(colorAffinity) * 0.25 +
-      getMapStrength(brandAffinity) * 0.2 +
+      getMapStrength(seededBrandAffinity) * 0.2 +
       getMapStrength(authorAffinity) * 0.2,
     0,
     1
   );
 
   const marketSignalStrength = clamp(
-    getMapStrength(categoryAffinity) * 0.22 +
-      getMapStrength(sizeAffinity) * 0.2 +
+    getMapStrength(seededCategoryAffinity) * 0.22 +
+      getMapStrength(seededSizeAffinity) * 0.2 +
       getMapStrength(priceBandAffinity) * 0.2 +
       getMapStrength(conditionAffinity) * 0.18 +
-      getMapStrength(brandAffinity) * 0.1 +
+      getMapStrength(seededBrandAffinity) * 0.1 +
       getMapStrength(authorAffinity) * 0.1,
     0,
     1
@@ -1090,16 +1245,20 @@ async function buildUserPreferenceProfile({ models, userId, now = new Date(), co
   return {
     followedAuthorSet,
     authorAffinity,
-    categoryAffinity,
-    brandAffinity,
+    categoryAffinity: seededCategoryAffinity,
+    brandAffinity: seededBrandAffinity,
     styleAffinity,
     colorAffinity,
-    sizeAffinity,
+    sizeAffinity: seededSizeAffinity,
     priceBandAffinity,
     conditionAffinity,
     marketShare: clamp(marketShare, blendConfig.minMarketShare, blendConfig.maxMarketShare),
     relevantActionCount,
     coldStartMode: relevantActionCount < COLD_START_ACTION_THRESHOLD,
+    onboardingSeedBlend,
+    onboardingBrandCount: onboardingSeeds.onboardingBrandCount,
+    onboardingRecognizedSizeCount: onboardingSeeds.onboardingRecognizedSizeCount,
+    onboardingCategorySeedCount: onboardingSeeds.onboardingCategorySeedCount,
     regularSignalStrength,
     marketSignalStrength,
   };

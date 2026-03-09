@@ -2,7 +2,7 @@
 
 ## Mental model
 Every feed request goes through four stages:
-1. Build a user preference profile from recent behavior.
+1. Build a user preference profile from recent behavior and cold-start profile preferences.
 2. Build a candidate pool of posts that are eligible to show.
 3. Score each candidate post.
 4. Order and constrain the final list (mix + diversity), then return paginated results.
@@ -24,6 +24,7 @@ Plain English:
 ## 2) Build the user profile (what the system thinks you like)
 - Data window is roughly the last 90 days of actions + current follows.
 - It uses weighted events like follow/unfollow, like/unlike, comment, patch-save, click, and dwell.
+- For sparse-history users, it also seeds brand/market affinities from saved `favoriteBrands` and recognized `sizePreferences`.
 - It creates normalized affinity maps (0..1) for:
   - author
   - style
