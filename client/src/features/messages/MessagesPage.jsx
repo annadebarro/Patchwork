@@ -111,8 +111,27 @@ function MessagesPage({ currentUser }) {
       const socketUrl = API_BASE_URL.replace("/api", "");
       socket = io(socketUrl || window.location.origin, {
         auth: { token },
+        forceNew: true,
       });
       socketRef.current = socket;
+
+      // On (re)connect, re-fetch messages for the active conversation so any
+      // messages sent while the socket was disconnected appear without a full
+      // page refresh.
+      socket.on("connect", () => {
+        const convoId = activeConvoIdRef.current;
+        if (!convoId) return;
+        const currentToken = localStorage.getItem("token");
+        if (!currentToken) return;
+        fetch(`${API_BASE_URL}/messages/conversations/${convoId}`, {
+          headers: { Authorization: `Bearer ${currentToken}` },
+        })
+          .then((res) => parseApiResponse(res).then((data) => ({ ok: res.ok, data })))
+          .then(({ ok, data }) => {
+            if (ok) setMessages(Array.isArray(data?.messages) ? data.messages : []);
+          })
+          .catch(() => {});
+      });
 
       socket.on("new_message", ({ message, conversationId }) => {
         // Use ref so this handler always sees the current conversation
