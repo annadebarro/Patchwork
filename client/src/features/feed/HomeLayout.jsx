@@ -2,38 +2,20 @@ import { useState } from "react";
 import PostsGrid from "./PostsGrid";
 
 function HomeLayout({ refreshKey }) {
-  const [filters, setFilters] = useState({ social: true, marketplace: true });
+  const [socialOnly, setSocialOnly] = useState(false);
 
-  function toggleFilter(key) {
-    setFilters((prev) => {
-      const other = key === "social" ? "marketplace" : "social";
-      if (prev[key] && !prev[other]) return prev;
-      return { ...prev, [key]: !prev[key] };
-    });
-  }
-
-  const type = filters.social && filters.marketplace
-    ? null
-    : filters.social
-      ? "regular"
-      : "market";
+  const type = socialOnly ? "regular" : null;
 
   return (
     <>
       <nav className="feed-tabs">
         <button
           type="button"
-          className={`feed-tab ${filters.social ? "active" : ""}`}
-          onClick={() => toggleFilter("social")}
+          className={`social-toggle ${socialOnly ? "on" : "off"}`}
+          onClick={() => setSocialOnly((prev) => !prev)}
         >
-          Social
-        </button>
-        <button
-          type="button"
-          className={`feed-tab ${filters.marketplace ? "active" : ""}`}
-          onClick={() => toggleFilter("marketplace")}
-        >
-          Marketplace
+          <span className="social-toggle__label">social only</span>
+          <span className="social-toggle__badge">{socialOnly ? "ON" : "OFF"}</span>
         </button>
       </nav>
       <div className="feed-content">

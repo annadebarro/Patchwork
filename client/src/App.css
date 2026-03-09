@@ -1634,59 +1634,65 @@ button:disabled {
   border-bottom: 2px dashed var(--stitch);
 }
 
-.feed-tab {
-  padding: 10px 24px;
-  border-radius: 0;
-  text-decoration: none;
-  cursor: pointer;
-  font-weight: 700;
-  font-family: 'Special Elite', cursive;
-  color: var(--denim-dark);
-  background: var(--paper);
+/* Social Only Toggle */
+.social-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
   border: 2px solid var(--denim-wash);
-  transition: all 0.2s;
+  background: var(--paper);
+  cursor: pointer;
+  font-family: 'Special Elite', cursive;
+  font-size: 0.9rem;
+  color: var(--denim-dark);
   text-transform: lowercase;
   letter-spacing: 1px;
-  position: relative;
+  transition: all 0.2s;
+  transform: rotate(-0.5deg);
 }
 
-.feed-tab:first-child {
-  transform: rotate(-1deg);
-}
-
-.feed-tab:last-child {
-  transform: rotate(1.5deg);
-}
-
-.feed-tab::before {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  right: 3px;
-  bottom: 3px;
-  border: 1px dashed transparent;
-  transition: border-color 0.2s;
-}
-
-.feed-tab:hover {
-  background: var(--denim-wash);
+.social-toggle:hover {
   border-color: var(--denim-mid);
+  background: var(--denim-wash);
 }
 
-.feed-tab:hover::before {
-  border-color: var(--cream);
+.social-toggle__label {
+  font-weight: 700;
 }
 
-.feed-tab.active {
+.social-toggle__badge {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 2px 7px;
+  border-radius: 2px;
+  transition: all 0.2s;
+}
+
+.social-toggle.off .social-toggle__badge {
+  background: var(--denim-wash);
+  color: var(--denim-mid);
+  border: 1px solid var(--denim-wash);
+}
+
+.social-toggle.on {
   background: var(--denim-dark);
-  color: var(--cream);
   border-color: var(--denim-dark);
+  color: var(--cream);
   box-shadow: 3px 3px 0 var(--rust);
 }
 
-.feed-tab.active::before {
-  border-color: var(--stitch);
+.social-toggle.on .social-toggle__badge {
+  background: var(--rust);
+  color: var(--cream);
+  border: 1px solid var(--rust);
+}
+
+.social-toggle.on:hover {
+  background: var(--denim-dark);
+  border-color: var(--denim-dark);
 }
 
 /* Feed Content */
