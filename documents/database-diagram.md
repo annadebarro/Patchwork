@@ -1,22 +1,32 @@
 # Patchwork Database Diagram
 
-This diagram is based on the implemented Sequelize schema in [server/src/models/index.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/src/models/index.js) plus the recommendation/admin migrations in:
+This ERD reflects the current Patchwork Postgres schema as implemented in [server/src/models/index.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/src/models/index.js) and extended by the key schema migrations below:
 
+- [20260210-0001-create-core-schema.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260210-0001-create-core-schema.js)
+- [20260211-0004-add-post-feature-richness.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260211-0004-add-post-feature-richness.js)
+- [20260216-0006-add-image-urls-array.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260216-0006-add-image-urls-array.js)
+- [20260216-0006-add-user-role-admin.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260216-0006-add-user-role-admin.js)
+- [20260218-0008-add-ratings-system.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260218-0008-add-ratings-system.js)
+- [20260218-0009-add-notification-conversation-id.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260218-0009-add-notification-conversation-id.js)
+- [20260218-0010-soft-delete-conversations.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260218-0010-soft-delete-conversations.js)
 - [20260219-0009-add-recommendation-config-history.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260219-0009-add-recommendation-config-history.js)
 - [20260219-0010-add-recommendation-simulation-runs.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260219-0010-add-recommendation-simulation-runs.js)
+- [20260219-0011-add-quilt-preview-image.js](/Users/jacklund/Documents/CS/CS422/Patchwork/server/migrations/20260219-0011-add-quilt-preview-image.js)
 
-For presentation use, the schema is split into two diagrams so the slide stays readable.
+The schema is split into a product ERD and an admin/analytics ERD so each diagram stays readable on a slide.
 
-## Core Application Schema
+## Core Product ERD
 
 ```mermaid
-erDiagram
   USERS {
     UUID id PK
-    STRING email
-    STRING username
+    STRING email UK
+    STRING username UK
     STRING name
+    JSONB size_preferences
+    TEXT_ARRAY favorite_brands
     ENUM onboarding_status
+    TEXT profile_picture
     ENUM role
   }
 
@@ -25,7 +35,16 @@ erDiagram
     UUID user_id FK
     ENUM type
     TEXT caption
+    TEXT image_url
+    TEXT_ARRAY image_urls
     INTEGER price_cents
+    TEXT category
+    TEXT subcategory
+    TEXT brand
+    TEXT_ARRAY style_tags
+    TEXT_ARRAY color_tags
+    TEXT condition
+    TEXT size_label
     BOOLEAN is_public
     BOOLEAN is_sold
   }
@@ -60,6 +79,7 @@ erDiagram
     UUID id PK
     UUID user_id FK
     STRING name
+    TEXT description
     BOOLEAN is_public
     TEXT preview_image_url
   }
@@ -81,7 +101,7 @@ erDiagram
     UUID id PK
     UUID conversation_id FK
     UUID user_id FK
-    DATE left_at
+    TIMESTAMPTZ left_at
   }
 
   MESSAGES {
@@ -143,7 +163,7 @@ erDiagram
   CONVERSATIONS ||--o{ RATINGS : contextualizes
 ```
 
-## Recommendation and Admin Extension
+## Admin and Recommendation ERD
 
 ```mermaid
 erDiagram
@@ -161,19 +181,20 @@ erDiagram
     STRING target_type
     JSONB metadata_json
     STRING source_surface
-    DATE occurred_at
+    TIMESTAMPTZ occurred_at
     UUID session_id
   }
 
   RECOMMENDATION_CONFIGS {
     UUID id PK
-    BIGINT version
+    BIGINT version UK
     TEXT scope
     JSONB config_json
     BOOLEAN is_active
     UUID created_by FK
     TEXT source
     UUID source_run_id
+    TEXT notes
   }
 
   RECOMMENDATION_SIMULATION_RUNS {
@@ -183,18 +204,18 @@ erDiagram
     JSONB result_summary_json
     JSONB candidate_config_json
     UUID created_by FK
-    DATE created_at
+    TIMESTAMPTZ created_at
   }
 
-  USERS ||--o{ USER_ACTIONS : generates
+  USERS ||--o{ USER_ACTIONS : records
   USERS o|--o{ RECOMMENDATION_CONFIGS : creates
   USERS o|--o{ RECOMMENDATION_SIMULATION_RUNS : launches
 ```
 
-## Presentation Notes
+## Schema Notes
 
-- Use the **Core Application Schema** on a slide if you want to explain how Patchwork supports social posting, quilts, marketplace messaging, notifications, and ratings in one database.
-- Use the **Recommendation and Admin Extension** only if you want to show technical depth around analytics and recommendation tuning.
-- `user_actions.target_id` and `user_actions.target_type` are intentionally modeled as polymorphic event references, so they are not drawn as hard foreign keys to a single table.
-- `recommendation_configs.source_run_id` is a logical reference to a simulation run, but it is not enforced as a database foreign key.
-- Several tables contain more fields than shown here, especially `users` and `posts`. The diagram keeps only the most presentation-relevant attributes so it stays readable.
+- `conversation_participants.left_at` implements per-user soft deletion for conversations; the conversation itself stays in the database.
+- `user_actions.target_type` plus `target_id` is a polymorphic event target, so it is intentionally not drawn as a hard foreign key to one table.
+- `recommendation_configs.source_run_id` usually points at `recommendation_simulation_runs.id`, but that link is logical rather than enforced by a database constraint.
+- Important uniqueness constraints not obvious from the ERD: follows `(follower_id, followee_id)`, likes `(user_id, post_id)`, comment likes `(user_id, comment_id)`, patches `(quilt_id, post_id)`, conversation participants `(conversation_id, user_id)`, and ratings `(rater_id, conversation_id)`.
+- For slides, use only the **Core Product ERD** unless you specifically want to discuss recommendation tuning or admin tooling.
