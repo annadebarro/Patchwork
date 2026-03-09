@@ -239,6 +239,10 @@ async function fetchHybridRecommendations({
               regularSignalStrength: roundMetric(profile?.regularSignalStrength, 6),
               marketSignalStrength: roundMetric(profile?.marketSignalStrength, 6),
               followedAuthorCount: profile?.followedAuthorSet?.size || 0,
+              onboardingSeedBlend: roundMetric(profile?.onboardingSeedBlend, 6),
+              onboardingBrandCount: Number(profile?.onboardingBrandCount || 0),
+              onboardingRecognizedSizeCount: Number(profile?.onboardingRecognizedSizeCount || 0),
+              onboardingCategorySeedCount: Number(profile?.onboardingCategorySeedCount || 0),
             },
           }
         : null,

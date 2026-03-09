@@ -28,6 +28,10 @@ function createProfile(overrides = {}) {
     conditionAffinity: new Map(),
     marketShare: DEFAULT_MARKET_SHARE,
     relevantActionCount: 0,
+    onboardingSeedBlend: 1,
+    onboardingBrandCount: 0,
+    onboardingRecognizedSizeCount: 0,
+    onboardingCategorySeedCount: 0,
     ...overrides,
   };
 }
@@ -69,6 +73,32 @@ test("scoreRegularPost boosts followed authors", () => {
   const nonFollowedScore = scoreRegularPost(basePost, { profile: nonFollowedProfile, now }).score;
 
   assert.ok(followedScore > nonFollowedScore);
+});
+
+test("scoreRegularPost prefers onboarding-seeded brand matches for cold-start users", () => {
+  const now = new Date("2026-02-18T00:00:00.000Z");
+  const matchingPost = {
+    id: "post-nike",
+    createdAt: "2026-02-17T00:00:00.000Z",
+    styleTags: [],
+    colorTags: [],
+    brand: "nike",
+    author: { id: "author-1" },
+    _engagementVelocity: 0.1,
+  };
+  const nonMatchingPost = {
+    ...matchingPost,
+    id: "post-adidas",
+    brand: "adidas",
+  };
+  const profile = createProfile({
+    brandAffinity: new Map([["nike", 1]]),
+  });
+
+  const matchingScore = scoreRegularPost(matchingPost, { profile, now }).score;
+  const nonMatchingScore = scoreRegularPost(nonMatchingPost, { profile, now }).score;
+
+  assert.ok(matchingScore > nonMatchingScore);
 });
 
 test("blendAndDiversify uses default market share when history is sparse", () => {
@@ -301,6 +331,39 @@ test("scoreMarketPost shifts weight to stable signals for low market intent", ()
   assert.ok(lowIntentScore.weights.engagementVelocity > highIntentScore.weights.engagementVelocity);
 });
 
+test("scoreMarketPost prefers onboarding-seeded brand, size, and category matches", () => {
+  const now = new Date("2026-02-18T00:00:00.000Z");
+  const matchingPost = {
+    id: "market-match",
+    type: "market",
+    createdAt: "2026-02-10T00:00:00.000Z",
+    category: "tops",
+    brand: "nike",
+    sizeLabel: "m",
+    condition: "like_new",
+    priceCents: 6400,
+    author: { id: "author-1" },
+    _engagementVelocity: 0.4,
+  };
+  const nonMatchingPost = {
+    ...matchingPost,
+    id: "market-miss",
+    category: "shoes",
+    brand: "adidas",
+    sizeLabel: "shoe_9",
+  };
+  const profile = createProfile({
+    categoryAffinity: new Map([["tops", 1]]),
+    brandAffinity: new Map([["nike", 1]]),
+    sizeAffinity: new Map([["m", 1]]),
+  });
+
+  const matchingScore = scoreMarketPost(matchingPost, { profile, now }).score;
+  const nonMatchingScore = scoreMarketPost(nonMatchingPost, { profile, now }).score;
+
+  assert.ok(matchingScore > nonMatchingScore);
+});
+
 test("filterUuidLike drops invalid IDs", () => {
   const ids = filterUuidLike([
     "not-a-uuid",
@@ -354,6 +417,156 @@ test("buildUserPreferenceProfile ignores invalid post IDs in action history", as
   });
 
   assert.deepEqual(capturedWhere.id[Op.in], [validPostId]);
+});
+
+test("buildUserPreferenceProfile seeds brand affinity from saved onboarding preferences", async () => {
+  const models = {
+    User: {
+      findByPk: async () => ({
+        favoriteBrands: [" Nike ", "Levi's"],
+        sizePreferences: {},
+      }),
+    },
+    Follow: {
+      findAll: async () => [],
+    },
+    UserAction: {
+      findAll: async () => [],
+    },
+  };
+
+  const profile = await buildUserPreferenceProfile({
+    models,
+    userId: "viewer-1",
+    now: new Date("2026-03-02T00:00:00.000Z"),
+  });
+
+  assert.equal(profile.brandAffinity.get("nike"), 1);
+  assert.equal(profile.brandAffinity.get("levi's"), 1);
+  assert.equal(profile.onboardingBrandCount, 2);
+  assert.equal(profile.onboardingSeedBlend, 1);
+});
+
+test("buildUserPreferenceProfile seeds size and category affinity from recognized onboarding sizes", async () => {
+  const models = {
+    User: {
+      findByPk: async () => ({
+        favoriteBrands: [],
+        sizePreferences: {
+          tops: [{ label: " M " }, { label: "10" }],
+          shoes: [{ label: "9" }],
+          bottoms: [{ label: "30x32" }],
+          outerwear: [{ measurementName: "chest", measurementValue: 40 }],
+        },
+      }),
+    },
+    Follow: {
+      findAll: async () => [],
+    },
+    UserAction: {
+      findAll: async () => [],
+    },
+  };
+
+  const profile = await buildUserPreferenceProfile({
+    models,
+    userId: "viewer-1",
+    now: new Date("2026-03-02T00:00:00.000Z"),
+  });
+
+  assert.equal(profile.sizeAffinity.get("m"), 1);
+  assert.equal(profile.sizeAffinity.get("numeric_10"), 1);
+  assert.equal(profile.sizeAffinity.get("shoe_9"), 1);
+  assert.equal(profile.categoryAffinity.get("tops"), 1);
+  assert.equal(profile.categoryAffinity.get("shoes"), 1);
+  assert.equal(profile.categoryAffinity.has("bottoms"), false);
+  assert.equal(profile.onboardingRecognizedSizeCount, 3);
+  assert.equal(profile.onboardingCategorySeedCount, 2);
+});
+
+test("buildUserPreferenceProfile ignores unrecognized onboarding size labels", async () => {
+  const models = {
+    User: {
+      findByPk: async () => ({
+        favoriteBrands: [],
+        sizePreferences: {
+          bottoms: [{ label: "30x32" }],
+          shoes: [{ label: "7.5" }],
+          tops: [{ measurementName: "chest", measurementValue: 38 }],
+        },
+      }),
+    },
+    Follow: {
+      findAll: async () => [],
+    },
+    UserAction: {
+      findAll: async () => [],
+    },
+  };
+
+  const profile = await buildUserPreferenceProfile({
+    models,
+    userId: "viewer-1",
+    now: new Date("2026-03-02T00:00:00.000Z"),
+  });
+
+  assert.equal(profile.sizeAffinity.size, 0);
+  assert.equal(profile.categoryAffinity.size, 0);
+  assert.equal(profile.onboardingRecognizedSizeCount, 0);
+  assert.equal(profile.onboardingCategorySeedCount, 0);
+});
+
+test("buildUserPreferenceProfile keeps a small onboarding floor after history matures", async () => {
+  const now = new Date("2026-03-02T00:00:00.000Z");
+  const postId = "a7df1162-04d7-4846-be01-21a095c96e63";
+  const actionRows = Array.from({ length: 28 }, () => ({
+    actionType: "post_like",
+    targetType: "post",
+    targetId: postId,
+    metadataJson: {},
+    occurredAt: now.toISOString(),
+  }));
+  const models = {
+    User: {
+      findByPk: async () => ({
+        favoriteBrands: ["Nike"],
+        sizePreferences: {},
+      }),
+    },
+    Follow: {
+      findAll: async () => [],
+    },
+    UserAction: {
+      findAll: async () => actionRows,
+    },
+    Post: {
+      findAll: async () => [
+        {
+          id: postId,
+          userId: "author-1",
+          type: "regular",
+          category: "unknown",
+          brand: "adidas",
+          styleTags: [],
+          colorTags: [],
+          sizeLabel: "unknown",
+          priceCents: null,
+          condition: "unknown",
+        },
+      ],
+    },
+  };
+
+  const profile = await buildUserPreferenceProfile({
+    models,
+    userId: "viewer-1",
+    now,
+  });
+
+  assert.equal(profile.relevantActionCount, 28);
+  assert.equal(profile.onboardingSeedBlend, 0.15);
+  assert.equal(profile.brandAffinity.get("adidas"), 1);
+  assert.equal(profile.brandAffinity.get("nike"), 0.15);
 });
 
 test("fetchUserNoveltyExclusions merges likes, patches, and recent seen posts", async () => {

@@ -173,3 +173,103 @@ test("fetchHybridRecommendations omits novelty-suppressed posts from candidate p
     assert.ok(where.id[Op.notIn].includes(seenPostId));
   }
 });
+
+test("fetchHybridRecommendations ranks onboarding-matching market posts first for cold-start users", async () => {
+  const matchingPostId = "22222222-2222-4222-8222-222222222222";
+  const nonMatchingPostId = "33333333-3333-4333-8333-333333333333";
+  const userId = "viewer-1";
+  const now = new Date("2026-03-02T00:00:00.000Z");
+
+  const models = {
+    User: {
+      sequelize: {
+        query: async () => [],
+      },
+      findByPk: async (requestedUserId) => {
+        assert.equal(requestedUserId, userId);
+        return {
+          favoriteBrands: ["Nike"],
+          sizePreferences: {
+            tops: [{ label: "M" }],
+          },
+        };
+      },
+    },
+    Follow: {
+      findAll: async () => [],
+    },
+    Like: {
+      findAll: async () => [],
+    },
+    Patch: {
+      findAll: async () => [],
+    },
+    UserAction: {
+      findAll: async () => [],
+      sequelize: {
+        query: async (_sql, options) => {
+          if (options?.replacements?.actionTypes) {
+            return [];
+          }
+          return [];
+        },
+      },
+    },
+    Post: {
+      sequelize: {
+        query: async () => [],
+      },
+      findAll: async ({ where }) => {
+        if (where.type !== "market") {
+          return [];
+        }
+
+        return [
+          {
+            toJSON: () => ({
+              id: nonMatchingPostId,
+              type: "market",
+              createdAt: "2026-03-01T00:00:00.000Z",
+              styleTags: [],
+              colorTags: [],
+              brand: "Adidas",
+              category: "shoes",
+              condition: "like_new",
+              sizeLabel: "shoe_9",
+              priceCents: 6400,
+              author: { id: "author-2" },
+            }),
+          },
+          {
+            toJSON: () => ({
+              id: matchingPostId,
+              type: "market",
+              createdAt: "2026-03-01T00:00:00.000Z",
+              styleTags: [],
+              colorTags: [],
+              brand: "Nike",
+              category: "tops",
+              condition: "like_new",
+              sizeLabel: "m",
+              priceCents: 6400,
+              author: { id: "author-1" },
+            }),
+          },
+        ];
+      },
+    },
+  };
+
+  const result = await fetchHybridRecommendations({
+    models,
+    type: "market",
+    limit: 10,
+    offset: 0,
+    userId,
+    now,
+  });
+
+  assert.equal(result.posts.length, 2);
+  assert.equal(result.posts[0].id, matchingPostId);
+  assert.equal(result.posts[1].id, nonMatchingPostId);
+});
