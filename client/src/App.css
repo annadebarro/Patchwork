@@ -4564,6 +4564,104 @@ button:disabled {
   margin: 12px 0;
 }
 
+/* Quilt Cover Photo */
+.quilt-cover-section {
+  margin: 16px 0;
+}
+
+.quilt-cover-cropper-wrap {
+  border: 2px dashed var(--stitch);
+  background: var(--cream);
+}
+
+.quilt-cover-preview {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: 320px;
+}
+
+.quilt-cover-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border: 2px solid var(--denim-wash);
+}
+
+.quilt-cover-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.quilt-cover-preview:hover .quilt-cover-overlay {
+  opacity: 1;
+}
+
+.quilt-cover-btn {
+  padding: 6px 14px;
+  background: var(--cream);
+  color: var(--denim-dark);
+  border: 2px solid var(--denim-dark);
+  font-family: 'Special Elite', cursive;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quilt-cover-btn:hover {
+  background: var(--denim-dark);
+  color: var(--cream);
+}
+
+.quilt-cover-btn--remove {
+  background: transparent;
+  color: var(--cream);
+  border-color: var(--cream);
+}
+
+.quilt-cover-btn--remove:hover {
+  background: var(--rust);
+  border-color: var(--rust);
+  color: var(--cream);
+}
+
+.quilt-cover-empty {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--denim-wash);
+  background: var(--paper);
+  color: var(--denim-mid);
+  font-family: 'Special Elite', cursive;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quilt-cover-empty:hover {
+  border-color: var(--denim-mid);
+  background: var(--denim-wash);
+  color: var(--denim-dark);
+}
+
 .quilt-preview-backdrop {
   position: fixed;
   inset: 0;

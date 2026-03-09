@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL, parseApiResponse } from "../../shared/api/http";
+import ImageCropper from "../feed/ImageCropper";
 import GrannySquareGrid from "./GrannySquareGrid";
 
 function QuiltDetailView({ quiltId, isOwner, onBack }) {
@@ -19,6 +20,10 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
   const [previewSaving, setPreviewSaving] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [pendingPreview, setPendingPreview] = useState(null);
+  const [rawCoverUrl, setRawCoverUrl] = useState(null);
+  const [showCoverCropper, setShowCoverCropper] = useState(false);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const coverInputRef = useRef(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -147,6 +152,36 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
       setPreviewError("Failed to update preview image.");
     } finally {
       setPreviewSaving(false);
+    }
+  }
+
+  function handleCoverFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setRawCoverUrl(URL.createObjectURL(file));
+    setShowCoverCropper(true);
+    e.target.value = "";
+  }
+
+  async function handleCoverCropDone(croppedFile) {
+    setShowCoverCropper(false);
+    setRawCoverUrl(null);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setCoverUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", croppedFile);
+      form.append("folder", "quilt-covers");
+      const uploadRes = await fetch(`${API_BASE_URL}/uploads`, {
+        method: "POST",
+        body: form,
+      });
+      const uploadData = await parseApiResponse(uploadRes);
+      if (!uploadRes.ok) return;
+      await updatePreviewImage(uploadData.publicUrl);
+    } finally {
+      setCoverUploading(false);
     }
   }
 
@@ -319,6 +354,65 @@ function QuiltDetailView({ quiltId, isOwner, onBack }) {
           )}
         </>
       )}
+      {(isOwner || quilt?.previewImageUrl) && (
+        <div className="quilt-cover-section">
+          {showCoverCropper && rawCoverUrl ? (
+            <div className="quilt-cover-cropper-wrap">
+              <ImageCropper
+                mode="avatar"
+                imageUrl={rawCoverUrl}
+                onCropDone={handleCoverCropDone}
+                onChangeImage={() => { setShowCoverCropper(false); setRawCoverUrl(null); }}
+              />
+            </div>
+          ) : (
+            <>
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleCoverFileChange}
+                hidden
+              />
+              {quilt?.previewImageUrl ? (
+                <div className="quilt-cover-preview">
+                  <img src={quilt.previewImageUrl} alt="Quilt cover" className="quilt-cover-img" />
+                  {isOwner && (
+                    <div className="quilt-cover-overlay">
+                      <button
+                        type="button"
+                        className="quilt-cover-btn"
+                        onClick={() => coverInputRef.current?.click()}
+                        disabled={coverUploading}
+                      >
+                        {coverUploading ? "Uploading..." : "Change cover"}
+                      </button>
+                      <button
+                        type="button"
+                        className="quilt-cover-btn quilt-cover-btn--remove"
+                        onClick={() => updatePreviewImage(null)}
+                        disabled={coverUploading}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : isOwner ? (
+                <button
+                  type="button"
+                  className="quilt-cover-empty"
+                  onClick={() => coverInputRef.current?.click()}
+                  disabled={coverUploading}
+                >
+                  {coverUploading ? "Uploading..." : "+ Add cover photo"}
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
+
       <GrannySquareGrid
         images={patches}
         isOwner={isOwner}
